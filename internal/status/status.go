@@ -21,9 +21,11 @@ package status
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/network"
 	"github.com/ropslabs/x3f/internal/releases"
 )
 
@@ -309,4 +311,73 @@ func count(n uint64, noun string) string {
 		return "1 " + noun
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// NetworkInput holds the chain IDs reported by both clients of a node.
+type NetworkInput struct {
+	// Expected is the network from the config ("" if not set).
+	Expected string
+
+	ExecutionID      uint64
+	ExecutionErr     error
+	ExecutionSkipped bool // client unreachable, already reported
+
+	ConsensusID      uint64
+	ConsensusErr     error
+	ConsensusSkipped bool
+}
+
+// AssessNetwork checks that both clients are on the same network, and on
+// the expected one if the config names it.
+//
+//	red:    execution and consensus client on different networks; a client
+//	        on another network than configured; client unreachable
+//	yellow: network query failed
+//	note:   network not known to x3f (e.g. a devnet): fork checks will not
+//	        be possible
+func AssessNetwork(in NetworkInput) Assessment {
+	var a Assessment
+	el, haveEL := chainID(&a, "execution", in.ExecutionID, in.ExecutionErr, in.ExecutionSkipped)
+	cl, haveCL := chainID(&a, "consensus", in.ConsensusID, in.ConsensusErr, in.ConsensusSkipped)
+
+	if haveEL && haveCL && el != cl {
+		a.add(Crit, "execution client is on %s, consensus client on %s",
+			network.Describe(el), network.Describe(cl))
+	}
+	if in.Expected != "" {
+		if haveEL && network.Describe(el) != in.Expected {
+			a.add(Crit, "expected %s, execution client is on %s", in.Expected, network.Describe(el))
+		}
+		if haveCL && network.Describe(cl) != in.Expected {
+			a.add(Crit, "expected %s, consensus client is on %s", in.Expected, network.Describe(cl))
+		}
+	}
+
+	// One note per unknown chain ID.
+	var unknown []uint64
+	for _, id := range []struct {
+		id   uint64
+		have bool
+	}{{el, haveEL}, {cl, haveCL}} {
+		if _, known := network.ByChainID(id.id); id.have && !known && !slices.Contains(unknown, id.id) {
+			unknown = append(unknown, id.id)
+			a.add(OK, "unknown network (chain %d): no fork data available", id.id)
+		}
+	}
+	return a
+}
+
+// chainID reports a failed or skipped query and returns the ID if usable.
+func chainID(a *Assessment, layer string, id uint64, err error, skipped bool) (uint64, bool) {
+	switch {
+	case skipped:
+		return 0, false
+	case err == nil:
+		return id, true
+	case ethereum.IsTransportError(err):
+		a.add(Crit, "%s network query unreachable: %v", layer, err)
+	default:
+		a.add(Warn, "%s network detection failed: %v", layer, err)
+	}
+	return 0, false
 }

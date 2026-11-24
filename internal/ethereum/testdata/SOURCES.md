@@ -253,3 +253,38 @@ whitespace); no request or response headers.
 Also observed, not stored as a file: `https://eth.llamarpc.com` answered with
 HTTP 525 and the plain-text body `error code: 525` (Cloudflare origin TLS
 error); covered by a synthetic test case.
+
+## Network detection
+
+### execution/chainid-spec-example.json — literal
+
+`"result": "0x1"` from the `eth_chainId` example in
+[execution-apis src/eth/client.yaml L1-L13](https://github.com/ethereum/execution-apis/blob/1ca0818569467cff85b7f41372f22e728d5daa14/src/eth/client.yaml#L1-L13).
+
+### consensus/deposit-contract-spec-example.json — literal
+
+`{"data":{"chain_id":"1","address":"0x00000000219ab540356cBB839Cbe05303d7705Fa"}}`, the
+`example` values of
+[beacon-APIs v4.0.0 apis/config/deposit_contract.yaml](https://github.com/ethereum/beacon-APIs/blob/88fc9402c6a1821b6e9ae4e3b8ae0a22f1141203/apis/config/deposit_contract.yaml).
+
+### Chain IDs
+
+| Network | Chain ID | Execution side | Consensus side |
+|---|---|---|---|
+| mainnet | 1 | [go-ethereum params/chainspecs/mainnet.json L3](https://github.com/ethereum/go-ethereum/blob/1df30b18d9ed35ee9d28ffd4648442c2204554ad/params/chainspecs/mainnet.json#L3) | [Lighthouse mainnet/config.yaml L152](https://github.com/sigp/lighthouse/blob/57c2abc13078bf949e4d19df6178a644b064c32c/common/eth2_network_config/built_in_network_configs/mainnet/config.yaml#L152) (`DEPOSIT_CHAIN_ID`) |
+| sepolia | 11155111 (`0xaa36a7`) | [go-ethereum params/chainspecs/sepolia.json L3](https://github.com/ethereum/go-ethereum/blob/1df30b18d9ed35ee9d28ffd4648442c2204554ad/params/chainspecs/sepolia.json#L3) | [Lighthouse sepolia/config.yaml L111](https://github.com/sigp/lighthouse/blob/57c2abc13078bf949e4d19df6178a644b064c32c/common/eth2_network_config/built_in_network_configs/sepolia/config.yaml#L111) |
+| hoodi | 560048 (`0x88bb0`) | [go-ethereum params/chainspecs/hoodi.json L3](https://github.com/ethereum/go-ethereum/blob/1df30b18d9ed35ee9d28ffd4648442c2204554ad/params/chainspecs/hoodi.json#L3) | [Lighthouse hoodi/config.yaml L111](https://github.com/sigp/lighthouse/blob/57c2abc13078bf949e4d19df6178a644b064c32c/common/eth2_network_config/built_in_network_configs/hoodi/config.yaml#L111) |
+
+Holesky is not supported: "deprecated as of September 2025" per
+[ethereum.org/developers/docs/networks](https://ethereum.org/en/developers/docs/networks/).
+
+### Live recordings (2026-11-24)
+
+| File | Endpoint | Notes |
+|---|---|---|
+| `execution/live/chainid-publicnode-mainnet.json` | `https://ethereum-rpc.publicnode.com` | `0x1` |
+| `execution/live/chainid-publicnode-sepolia.json` | `https://ethereum-sepolia-rpc.publicnode.com` | `0xaa36a7` |
+| `execution/live/chainid-publicnode-hoodi.json` | `https://ethereum-hoodi-rpc.publicnode.com` | `0x88bb0` |
+| `consensus/live/deposit-contract-publicnode-mainnet.json` | `https://ethereum-beacon-api.publicnode.com` | `"1"`, address in lower case |
+| `consensus/live/deposit-contract-publicnode-sepolia.json` | `https://ethereum-sepolia-beacon-api.publicnode.com` | `"11155111"` |
+| `consensus/live/deposit-contract-lodestar-hoodi.json` | `https://lodestar-hoodi.chainsafe.io` | `"560048"`; **same deposit contract address as mainnet**, so only `chain_id` identifies the network |

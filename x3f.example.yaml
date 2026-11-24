@@ -10,3 +10,6 @@ nodes:
     execution_url: http://localhost:8545
     # Consensus client beacon API (Lighthouse, Prysm, Teku, Nimbus, Lodestar, Grandine)
     beacon_url: http://localhost:5052
+    # Optional: expected network (mainnet, sepolia, hoodi). x3f detects the
+    # network anyway; if this is set, a node on another network is critical.
+    network: mainnet

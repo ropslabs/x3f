@@ -161,28 +161,34 @@ func newMocks(t *testing.T) mocks {
 		gethSynced: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/geth.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
 		}),
 		gethIndexing: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/geth.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-geth-indexing.json"),
+			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
 		}),
 		// besu/v23.1.1-dev-ac23d311: a dev build, years behind.
 		besuOutdated: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/besu.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
 		}),
 		// Blocks web3_clientVersion but lets eth_syncing through.
 		proxyBlocksVersion: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/error-method-not-found.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
 		}),
 		lighthouseSynced: mockClient(t, map[string][]byte{
-			"/eth/v1/node/version": fixture(t, "consensus/lighthouse.json"),
-			"/eth/v1/node/syncing": fixture(t, "consensus/syncing-synced.json"),
+			"/eth/v1/node/version":            fixture(t, "consensus/lighthouse.json"),
+			"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
+			"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-publicnode-mainnet.json"),
 		}),
 		nimbusSynced: mockClient(t, map[string][]byte{
-			"/eth/v1/node/version": fixture(t, "consensus/nimbus.json"),
-			"/eth/v1/node/syncing": fixture(t, "consensus/syncing-synced.json"),
+			"/eth/v1/node/version":            fixture(t, "consensus/nimbus.json"),
+			"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
+			"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-publicnode-mainnet.json"),
 		}),
 		broken:   mockClient(t, nil), // 404 for everything
 		deadAddr: addr,
@@ -228,12 +234,12 @@ nodes:
 		node string
 		want []string
 	}{
-		{"NODE", []string{"STATUS", "NODE", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC"}},
-		{"good-node", []string{"OK", "good-node", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced"}},
-		{"warn-node", []string{"WARN", "warn-node", "Geth 1.17.10 (stable)", "indexing", "Lighthouse 8.3.3", "synced"}},
-		{"outdated-node", []string{"CRIT", "outdated-node", "Besu 23.1.1 (dev) -> 26.11.2", "synced", "Nimbus 26.10.2 (stateofus)", "synced"}},
-		{"down-node", []string{"CRIT", "down-node", "ERROR", "-", "ERROR", "ERROR"}},
-		{"proxy-node", []string{"WARN", "proxy-node", "ERROR", "synced", "Lighthouse 8.3.3", "synced"}},
+		{"NODE", []string{"STATUS", "NODE", "NETWORK", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC"}},
+		{"good-node", []string{"OK", "good-node", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced"}},
+		{"warn-node", []string{"WARN", "warn-node", "mainnet", "Geth 1.17.10 (stable)", "indexing", "Lighthouse 8.3.3", "synced"}},
+		{"outdated-node", []string{"CRIT", "outdated-node", "mainnet", "Besu 23.1.1 (dev) -> 26.11.2", "synced", "Nimbus 26.10.2 (stateofus)", "synced"}},
+		{"down-node", []string{"CRIT", "down-node", "?", "ERROR", "-", "ERROR", "ERROR"}},
+		{"proxy-node", []string{"WARN", "proxy-node", "mainnet", "ERROR", "synced", "Lighthouse 8.3.3", "synced"}},
 	}
 	for _, r := range rows {
 		if cells := rowCells(t, got, r.node); !slices.Equal(cells, r.want) {
@@ -249,6 +255,7 @@ nodes:
 		"WARN  down-node consensus: version query failed: /eth/v1/node/version: unexpected HTTP status 404",
 		"WARN  down-node consensus sync: sync status query failed",
 		"WARN  proxy-node execution: version query failed: web3_clientVersion: JSON-RPC error -32601",
+		"WARN  down-node network: consensus network detection failed: /eth/v1/config/deposit_contract: unexpected HTTP status 404 Not Found",
 		"Status: CRIT (1 OK, 2 WARN, 2 CRIT)",
 	} {
 		if !strings.Contains(got, want) {
@@ -553,6 +560,7 @@ func TestRunProxyVersion(t *testing.T) {
 	drpc := mockClient(t, map[string][]byte{
 		"web3_clientVersion": fixture(t, "execution/live/proxy-drpc-mainnet.json"),
 		"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+		"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
 	})
 	m := newMocks(t)
 	path := writeConfig(t, "nodes:\n  - {name: drpc, execution_url: "+drpc.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
@@ -574,4 +582,92 @@ func TestRunProxyVersion(t *testing.T) {
 		t.Errorf("go-ethereum requests = %d, want 2 (fetch, then refresh on the cached run)", n)
 	}
 	gh.mu.Unlock()
+}
+
+func TestRunNetwork(t *testing.T) {
+	gh := newFakeGitHub(t)
+	m := newMocks(t)
+	el := func(chainFixture string) string {
+		return mockClient(t, map[string][]byte{
+			"web3_clientVersion": fixture(t, "execution/geth.json"),
+			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+			"eth_chainId":        fixture(t, chainFixture),
+		}).URL
+	}
+	cl := func(depositFixture string) string {
+		return mockClient(t, map[string][]byte{
+			"/eth/v1/node/version":            fixture(t, "consensus/lighthouse.json"),
+			"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
+			"/eth/v1/config/deposit_contract": fixture(t, depositFixture),
+		}).URL
+	}
+	// Synthetic devnet with chain ID 1337 (0x539).
+	devEL := mockClient(t, map[string][]byte{
+		"web3_clientVersion": fixture(t, "execution/geth.json"),
+		"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+		"eth_chainId":        []byte(`{"jsonrpc":"2.0","id":1,"result":"0x539"}`),
+	})
+	devCL := mockClient(t, map[string][]byte{
+		"/eth/v1/node/version":            fixture(t, "consensus/lighthouse.json"),
+		"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
+		"/eth/v1/config/deposit_contract": []byte(`{"data":{"chain_id":"1337","address":"0x0000000000000000000000000000000000000000"}}`),
+	})
+
+	tests := []struct {
+		name      string
+		node      string
+		wantCode  int
+		wantCell  string
+		wantFinds []string
+	}{
+		{
+			name:     "hoodi on both sides, as configured",
+			node:     "{name: n, execution_url: " + el("execution/live/chainid-publicnode-hoodi.json") + ", beacon_url: " + cl("consensus/live/deposit-contract-lodestar-hoodi.json") + ", network: hoodi}",
+			wantCode: exitOK,
+			wantCell: "hoodi",
+		},
+		{
+			name:      "execution and consensus on different networks",
+			node:      "{name: n, execution_url: " + el("execution/live/chainid-publicnode-sepolia.json") + ", beacon_url: " + cl("consensus/live/deposit-contract-publicnode-mainnet.json") + "}",
+			wantCode:  exitCrit,
+			wantCell:  "EL sepolia / CL mainnet",
+			wantFinds: []string{"CRIT  n network: execution client is on sepolia, consensus client on mainnet"},
+		},
+		{
+			name:     "on another network than configured",
+			node:     "{name: n, execution_url: " + m.gethSynced.URL + ", beacon_url: " + m.lighthouseSynced.URL + ", network: hoodi}",
+			wantCode: exitCrit,
+			wantCell: "mainnet",
+			wantFinds: []string{
+				"CRIT  n network: expected hoodi, execution client is on mainnet",
+				"CRIT  n network: expected hoodi, consensus client is on mainnet",
+			},
+		},
+		{
+			name:      "unknown network is a note",
+			node:      "{name: n, execution_url: " + devEL.URL + ", beacon_url: " + devCL.URL + "}",
+			wantCode:  exitOK,
+			wantCell:  "chain 1337",
+			wantFinds: []string{"NOTE  n network: unknown network (chain 1337): no fork data available"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, "nodes:\n  - "+tt.node+"\n")
+			var out bytes.Buffer
+			code := run(context.Background(), []string{"-config", path, "-cache-dir", t.TempDir()}, &out, &out, testEnv(gh, now))
+			got := out.String()
+			if code != tt.wantCode {
+				t.Errorf("exit %d, want %d\n%s", code, tt.wantCode, got)
+			}
+			if cells := rowCells(t, got, "n"); cells[2] != tt.wantCell {
+				t.Errorf("network cell = %q, want %q", cells[2], tt.wantCell)
+			}
+			for _, f := range tt.wantFinds {
+				if !strings.Contains(got, f) {
+					t.Errorf("missing finding %q\n%s", f, got)
+				}
+			}
+		})
+	}
 }

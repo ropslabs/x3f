@@ -13,6 +13,7 @@ import (
 
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/network"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
 )
@@ -25,19 +26,24 @@ type layerResult[S any] struct {
 	VersionErr error
 	Sync       S
 	SyncErr    error
-	// SyncSkipped is set when the version request could not reach the
-	// client at all (timeout, connection or DNS failure). The sync request
-	// would fail the same way and wait for the same timeout, so it is not
-	// sent. Errors the server returned do not skip it: some proxies block
-	// single methods such as web3_clientVersion but allow eth_syncing.
-	SyncSkipped bool
+	ChainID    uint64
+	ChainIDErr error
+	// Unreachable is set when the version request could not reach the
+	// client at all (timeout, connection or DNS failure). The sync and
+	// chain ID requests would fail the same way and wait for the same
+	// timeout, so they are not sent. Errors the server returned do not
+	// skip them: some proxies block single methods such as
+	// web3_clientVersion but allow eth_syncing.
+	Unreachable bool
 }
 
 // nodeResult holds the results for one configured node. It deliberately has
 // no URL fields: everything that is printed comes from here, so endpoint
 // URLs (which may contain API keys) cannot end up in the output.
 type nodeResult struct {
-	Name      string
+	Name string
+	// Network is the expected network from the config ("" if not set).
+	Network   string
 	Execution layerResult[ethereum.ExecutionSyncStatus]
 	Consensus layerResult[ethereum.ConsensusSyncStatus]
 }
@@ -52,6 +58,7 @@ func checkNodes(ctx context.Context, client *ethereum.Client, nodes []config.Nod
 	var wg sync.WaitGroup
 	for i, n := range nodes {
 		results[i].Name = n.Name
+		results[i].Network = n.Network
 		// Since Go 1.22 every loop iteration has its own i and n, so the
 		// goroutines below capture this iteration's values.
 		//
@@ -60,25 +67,27 @@ func checkNodes(ctx context.Context, client *ethereum.Client, nodes []config.Nod
 		// distinct memory, so no mutex is needed.
 		wg.Go(func() {
 			results[i].Execution = queryLayer(ctx, timeout, n.ExecutionURL,
-				client.ExecutionVersion, client.ExecutionSync)
+				client.ExecutionVersion, client.ExecutionSync, client.ExecutionChainID)
 		})
 		wg.Go(func() {
 			results[i].Consensus = queryLayer(ctx, timeout, n.BeaconURL,
-				client.ConsensusVersion, client.ConsensusSync)
+				client.ConsensusVersion, client.ConsensusSync, client.ConsensusChainID)
 		})
 	}
 	wg.Wait()
 	return results
 }
 
-// queryLayer asks one client for its version and then its sync status.
-// The sync request is skipped only if the client was unreachable.
+// queryLayer asks one client for its version, then its sync status and
+// chain ID. The later requests are skipped only if the client was
+// unreachable.
 // fetchVersion and fetchSync are method values such as
 // client.ExecutionVersion: functions bound to their receiver, which can be
 // passed around like any other function.
 func queryLayer[S any](ctx context.Context, timeout time.Duration, endpoint string,
 	fetchVersion func(context.Context, string) (string, error),
-	fetchSync func(context.Context, string) (S, error)) layerResult[S] {
+	fetchSync func(context.Context, string) (S, error),
+	fetchChainID func(context.Context, string) (uint64, error)) layerResult[S] {
 
 	var r layerResult[S]
 
@@ -86,13 +95,14 @@ func queryLayer[S any](ctx context.Context, timeout time.Duration, endpoint stri
 	if err != nil {
 		r.VersionErr = err
 		if ethereum.IsTransportError(err) {
-			r.SyncSkipped = true
+			r.Unreachable = true
 			return r
 		}
 	} else {
 		r.Version = ethereum.ParseClientVersion(raw)
 	}
 	r.Sync, r.SyncErr = withTimeout(ctx, timeout, endpoint, fetchSync)
+	r.ChainID, r.ChainIDErr = withTimeout(ctx, timeout, endpoint, fetchChainID)
 	return r
 }
 
@@ -183,9 +193,9 @@ func refreshIfAhead(ctx context.Context, src *releases.Source, results []nodeRes
 type row struct {
 	node       string
 	level      status.Level
-	cells      [4]string // execution, EL sync, consensus, CL sync
-	findings   [4]status.Assessment
-	layerNames [4]string
+	cells      [5]string // network, execution, EL sync, consensus, CL sync
+	findings   [5]status.Assessment
+	layerNames [5]string
 }
 
 // assess evaluates all results. It returns the rows and the overall level.
@@ -204,22 +214,28 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, now time.Ti
 	for _, r := range results {
 		ev := versionInput(r.Execution.Version, r.Execution.VersionErr)
 		cv := versionInput(r.Consensus.Version, r.Consensus.VersionErr)
-		a := [4]status.Assessment{
+		a := [5]status.Assessment{
+			status.AssessNetwork(status.NetworkInput{
+				Expected:    r.Network,
+				ExecutionID: r.Execution.ChainID, ExecutionErr: r.Execution.ChainIDErr, ExecutionSkipped: r.Execution.Unreachable,
+				ConsensusID: r.Consensus.ChainID, ConsensusErr: r.Consensus.ChainIDErr, ConsensusSkipped: r.Consensus.Unreachable,
+			}),
 			status.AssessVersion(ev),
-			status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.SyncSkipped, Err: r.Execution.SyncErr}, r.Execution.Sync),
+			status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync),
 			status.AssessVersion(cv),
-			status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.SyncSkipped, Err: r.Consensus.SyncErr}, r.Consensus.Sync),
+			status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync),
 		}
 		rw := row{
 			node: r.Name,
-			cells: [4]string{
+			cells: [5]string{
+				formatNetwork(r),
 				formatVersion(r.Execution.Version, r.Execution.VersionErr, ev),
-				formatSync(r.Execution.SyncSkipped, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
+				formatSync(r.Execution.Unreachable, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
 				formatVersion(r.Consensus.Version, r.Consensus.VersionErr, cv),
-				formatSync(r.Consensus.SyncSkipped, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
+				formatSync(r.Consensus.Unreachable, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
 			},
 			findings:   a,
-			layerNames: [4]string{"execution", "execution sync", "consensus", "consensus sync"},
+			layerNames: [5]string{"network", "execution", "execution sync", "consensus", "consensus sync"},
 		}
 		for _, x := range a {
 			rw.level = max(rw.level, x.Level)
@@ -271,7 +287,7 @@ func printReport(w io.Writer, rows []row, overall status.Level, color bool) erro
 	// padding, padchar, flags.
 	var table bytes.Buffer
 	tw := tabwriter.NewWriter(&table, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tNODE\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC")
+	fmt.Fprintln(tw, "STATUS\tNODE\tNETWORK\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC")
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.level, r.node, strings.Join(r.cells[:], "\t"))
 	}
@@ -336,6 +352,27 @@ func formatVersion(v ethereum.ClientVersion, err error, in status.VersionInput) 
 		}
 	}
 	return s
+}
+
+// formatNetwork renders the network cell: the network both clients are on,
+// "EL x / CL y" if they disagree, the one that is known if only one side
+// answered, "?" if detection failed and "-" if both are unreachable.
+func formatNetwork(r nodeResult) string {
+	el, cl := r.Execution, r.Consensus
+	haveEL := !el.Unreachable && el.ChainIDErr == nil
+	haveCL := !cl.Unreachable && cl.ChainIDErr == nil
+	switch {
+	case haveEL && haveCL && el.ChainID != cl.ChainID:
+		return "EL " + network.Describe(el.ChainID) + " / CL " + network.Describe(cl.ChainID)
+	case haveEL:
+		return network.Describe(el.ChainID)
+	case haveCL:
+		return network.Describe(cl.ChainID)
+	case el.Unreachable && cl.Unreachable:
+		return "-"
+	default:
+		return "?"
+	}
 }
 
 // formatSync handles the cases shared by both sync columns; format is only

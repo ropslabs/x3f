@@ -139,6 +139,39 @@ nodes:
 			wantErr: []string{"execution_url: invalid URL", "beacon_url: invalid URL"},
 		},
 		{
+			name: "known network",
+			yaml: `
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+    network: hoodi
+`,
+		},
+		{
+			// Holesky is deprecated and not supported.
+			name: "unknown network",
+			yaml: `
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+    network: holesky
+`,
+			wantErr: []string{`node "a": network "holesky" is not one of mainnet, sepolia, hoodi`},
+		},
+		{
+			name: "unknown network in other capitalisation",
+			yaml: `
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+    network: Holesky
+`,
+			wantErr: []string{`network "Holesky" is not one of mainnet, sepolia, hoodi`},
+		},
+		{
 			name: "unknown field",
 			yaml: `
 nodes:
@@ -177,5 +210,24 @@ nodes:
 				}
 			}
 		})
+	}
+}
+
+func TestNetworkNameIsNormalized(t *testing.T) {
+	for _, in := range []string{"mainnet", "Mainnet", "MAINNET", " mainnet "} {
+		cfg, err := Parse([]byte(`
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+    network: "` + in + `"
+`))
+		if err != nil {
+			t.Errorf("%q: unexpected error: %v", in, err)
+			continue
+		}
+		if got := cfg.Nodes[0].Network; got != "mainnet" {
+			t.Errorf("%q normalized to %q, want %q", in, got, "mainnet")
+		}
 	}
 }

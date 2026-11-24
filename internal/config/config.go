@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/ropslabs/x3f/internal/network"
 )
 
 // Config is the top-level structure of x3f.yaml.
@@ -30,6 +32,10 @@ type Node struct {
 	ExecutionURL string `yaml:"execution_url"`
 	// BeaconURL is the beacon API endpoint of the consensus client.
 	BeaconURL string `yaml:"beacon_url"`
+	// Network is optional: if set ("mainnet", "sepolia", "hoodi", any
+	// capitalisation), x3f reports it as critical when the node is on a
+	// different network. Validate normalizes it to lowercase.
+	Network string `yaml:"network,omitempty"`
 }
 
 // Load reads the config file at path, parses it and validates it.
@@ -100,6 +106,18 @@ func (c *Config) Validate() error {
 		}
 		if err := validateURL(n.BeaconURL); err != nil {
 			errs = append(errs, fmt.Errorf("%s: beacon_url: %w", label, err))
+		}
+		if n.Network != "" {
+			// Accept any capitalisation ("Mainnet") and store the
+			// canonical lowercase name. n is a copy, so write back
+			// through the slice index.
+			normalized := strings.ToLower(strings.TrimSpace(n.Network))
+			if _, ok := network.ByName(normalized); !ok {
+				errs = append(errs, fmt.Errorf("%s: network %q is not one of %s",
+					label, n.Network, strings.Join(network.Names(), ", ")))
+			} else {
+				c.Nodes[i].Network = normalized
+			}
 		}
 	}
 

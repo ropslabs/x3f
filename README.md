@@ -43,7 +43,7 @@ Built with solo stakers and small validator teams in mind, people who run nodes 
 
 ## Usage (preview)
 
-> What works today: client versions, sync status and comparison with the latest stable GitHub release. Fork readiness, security advisories and alerts are not built yet.
+> What works today: network detection, client versions, sync status and comparison with the latest stable GitHub release. Fork readiness, security advisories and alerts are not built yet.
 
 Build the binary (requires Go) and describe your nodes in `x3f.yaml` (see [`x3f.example.yaml`](x3f.example.yaml)):
 
@@ -53,9 +53,9 @@ go build -o x3f ./cmd/x3f
 ```
 
 ```
-STATUS  NODE       EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC
-OK      mainnet-1  Geth 1.17.10 (stable)         synced   Lighthouse 8.3.3            synced
-CRIT    hoodi-1    Besu 23.1.1 (dev) -> 26.11.2  synced   Nimbus 26.10.2 (stateofus)  syncing (1 slot behind), optimistic, EL offline
+STATUS  NODE       NETWORK  EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC
+OK      mainnet-1  mainnet  Geth 1.17.10 (stable)         synced   Lighthouse 8.3.3            synced
+CRIT    hoodi-1    hoodi    Besu 23.1.1 (dev) -> 26.11.2  synced   Nimbus 26.10.2 (stateofus)  syncing (1 slot behind), optimistic, EL offline
 
 Findings:
   CRIT  hoodi-1 execution: Besu dev build of 23.1.1 ("dev"): stable 23.1.1 released 1357 days ago; latest 26.11.2 (grace period 30 days)
@@ -75,6 +75,7 @@ Endpoint URLs are never printed, only node names, because provider URLs often co
 | | Green | Yellow | Red |
 |---|---|---|---|
 | **Version** | latest stable release (or newer, but not newer than every known release) | behind, but within the grace period; pre-release, dev build or unrecognized suffix; newer than every known release (proxy or custom build; x3f re-checks GitHub first); client not recognized; latest release unknown | behind for longer than the grace period (default 30 days, counted from the first newer stable release); client unreachable |
+| **Network** | both clients on the same network (and the configured one, if `network:` is set) | network could not be detected | execution and consensus client on different networks; node on another network than configured |
 | **Sync** | synced | indexing; optimistic; up to 32 blocks/slots behind | execution client offline; more than 32 blocks/slots behind |
 
 If GitHub is unreachable, cached release data younger than 7 days is used with a note only; older or missing data turns the status yellow.

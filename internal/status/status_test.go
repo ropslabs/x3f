@@ -264,3 +264,50 @@ func checkAssessment(t *testing.T, a Assessment, wantLevel Level, wantMsgs []str
 		}
 	}
 }
+
+func TestAssessNetwork(t *testing.T) {
+	const mainnet, sepolia, hoodi, devnet = 1, 11155111, 560048, 1337
+	tests := []struct {
+		name      string
+		in        NetworkInput
+		wantLevel Level
+		wantMsgs  []string
+	}{
+		{"same network", NetworkInput{ExecutionID: mainnet, ConsensusID: mainnet}, OK, nil},
+		{"as configured", NetworkInput{Expected: "hoodi", ExecutionID: hoodi, ConsensusID: hoodi}, OK, nil},
+		{
+			"mismatch", NetworkInput{ExecutionID: sepolia, ConsensusID: mainnet},
+			Crit, []string{"execution client is on sepolia, consensus client on mainnet"},
+		},
+		{
+			"mismatch and not as configured", NetworkInput{Expected: "mainnet", ExecutionID: sepolia, ConsensusID: mainnet},
+			Crit, []string{"consensus client on mainnet", "expected mainnet, execution client is on sepolia"},
+		},
+		{
+			// Only one side answered: still compared with the config.
+			"one side, wrong network", NetworkInput{Expected: "hoodi", ExecutionID: mainnet, ConsensusSkipped: true},
+			Crit, []string{"expected hoodi, execution client is on mainnet"},
+		},
+		{
+			"both unreachable: already reported elsewhere", NetworkInput{ExecutionSkipped: true, ConsensusSkipped: true},
+			OK, nil,
+		},
+		{
+			"query rejected", NetworkInput{ExecutionErr: errors.New("eth_chainId: JSON-RPC error -32601"), ConsensusID: mainnet},
+			Warn, []string{"execution network detection failed"},
+		},
+		{
+			"query unreachable", NetworkInput{ExecutionID: mainnet, ConsensusErr: transportErr(t)},
+			Crit, []string{"consensus network query unreachable"},
+		},
+		{
+			"unknown network, one note", NetworkInput{ExecutionID: devnet, ConsensusID: devnet},
+			OK, []string{"unknown network (chain 1337): no fork data available"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			checkAssessment(t, AssessNetwork(tt.in), tt.wantLevel, tt.wantMsgs)
+		})
+	}
+}
