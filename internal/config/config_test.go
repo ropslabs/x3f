@@ -18,7 +18,7 @@ func TestLoad(t *testing.T) {
 
 	want := []Node{
 		{Name: "mainnet-1", ExecutionURL: "http://localhost:8545", BeaconURL: "http://localhost:5052"},
-		{Name: "holesky-1", ExecutionURL: "https://holesky.example.internal:8545", BeaconURL: "https://holesky.example.internal:5052"},
+		{Name: "hoodi-1", ExecutionURL: "https://hoodi.example.internal:8545", BeaconURL: "https://hoodi.example.internal:5052"},
 	}
 	if len(cfg.Nodes) != len(want) {
 		t.Fatalf("got %d nodes, want %d", len(cfg.Nodes), len(want))
@@ -127,6 +127,18 @@ nodes:
 			wantErr: []string{"execution_url: invalid URL"},
 		},
 		{
+			// Provider URLs carry API keys; the error must not repeat them.
+			// The loop below checks that "secret" never appears in errors.
+			name: "unparsable url with key is not echoed",
+			yaml: `
+nodes:
+  - name: a
+    execution_url: "https://rpc host.example/v3/secret-key-123"
+    beacon_url: "https://user:secret-pw@host.example/%zz/secret"
+`,
+			wantErr: []string{"execution_url: invalid URL", "beacon_url: invalid URL"},
+		},
+		{
 			name: "unknown field",
 			yaml: `
 nodes:
@@ -146,6 +158,9 @@ nodes:
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Parse([]byte(tt.yaml))
+			if err != nil && strings.Contains(err.Error(), "secret") {
+				t.Errorf("error leaks URL contents: %v", err)
+			}
 
 			if len(tt.wantErr) == 0 {
 				if err != nil {

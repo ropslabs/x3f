@@ -1,0 +1,278 @@
+// Package ethereum queries Ethereum execution and consensus clients
+// (read-only) and parses the version strings they report.
+//
+// Endpoint URLs are treated as secrets: RPC providers often put API keys into
+// the path, query or subdomain. No error returned by this package contains
+// the URL or any part of it.
+package ethereum
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"slices"
+	"strings"
+)
+
+// maxResponseBytes limits how much of a response body is read. Version
+// responses are tiny; the limit protects against misbehaving endpoints.
+const maxResponseBytes = 1 << 20 // 1 MiB
+
+// Client queries execution and consensus clients over HTTP.
+//
+// The zero value is not usable; create one with NewClient.
+type Client struct {
+	http *http.Client
+}
+
+// NewClient returns a Client that uses httpClient for requests. Pass nil to
+// use a default client.
+//
+// Timeouts are controlled per call through the context, so httpClient does
+// not need its own Timeout.
+func NewClient(httpClient *http.Client) *Client {
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	}
+	// Copy the struct so that changing CheckRedirect does not affect the
+	// caller's client.
+	c := *httpClient
+	// Do not follow redirects. A JSON-RPC or beacon endpoint has no reason
+	// to redirect, and following one would send the request (and possibly
+	// credentials in the URL) somewhere the user did not configure.
+	c.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &Client{http: &c}
+}
+
+// ExecutionVersion calls web3_clientVersion on an execution client's JSON-RPC
+// endpoint and returns the raw version string.
+func (c *Client) ExecutionVersion(ctx context.Context, endpoint string) (string, error) {
+	var version string
+	if err := c.callRPC(ctx, endpoint, "web3_clientVersion", &version); err != nil {
+		return "", fmt.Errorf("web3_clientVersion: %w", err)
+	}
+	return version, nil
+}
+
+// ConsensusVersion calls GET /eth/v1/node/version on a consensus client's
+// beacon API and returns the raw version string.
+func (c *Client) ConsensusVersion(ctx context.Context, endpoint string) (string, error) {
+	var resp struct {
+		Data struct {
+			Version string `json:"version"`
+		} `json:"data"`
+	}
+	if err := c.getBeacon(ctx, endpoint, "eth/v1/node/version", &resp); err != nil {
+		return "", fmt.Errorf("/eth/v1/node/version: %w", err)
+	}
+	if resp.Data.Version == "" {
+		return "", errors.New("/eth/v1/node/version: response has no data.version")
+	}
+	return resp.Data.Version, nil
+}
+
+// rpcRequest and rpcResponse follow the JSON-RPC 2.0 specification.
+type rpcRequest struct {
+	JSONRPC string `json:"jsonrpc"`
+	ID      int    `json:"id"`
+	Method  string `json:"method"`
+	Params  []any  `json:"params"`
+}
+
+type rpcResponse struct {
+	// json.RawMessage keeps the "result" bytes undecoded, so we can first
+	// check for an error and then decode the result into the caller's type.
+	Result json.RawMessage `json:"result"`
+	Error  *rpcError       `json:"error"`
+}
+
+type rpcError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+func (c *Client) callRPC(ctx context.Context, endpoint, method string, result any) error {
+	u, err := parseEndpoint(endpoint)
+	if err != nil {
+		return err
+	}
+
+	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: 1, Method: method, Params: []any{}})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(body))
+	if err != nil {
+		return redact(err, u)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	var resp rpcResponse
+	if err := c.do(req, u, &resp); err != nil {
+		return err
+	}
+	if resp.Error != nil {
+		// The message comes from the server; redact it in case the server
+		// echoes the request URL.
+		return redact(fmt.Errorf("JSON-RPC error %d: %s", resp.Error.Code, resp.Error.Message), u)
+	}
+	if len(resp.Result) == 0 {
+		return errors.New("JSON-RPC response has neither result nor error")
+	}
+	if err := json.Unmarshal(resp.Result, result); err != nil {
+		return fmt.Errorf("decode result: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) getBeacon(ctx context.Context, endpoint, path string, out any) error {
+	base, err := parseEndpoint(endpoint)
+	if err != nil {
+		return err
+	}
+	// JoinPath keeps an existing path prefix and query string, so provider
+	// URLs like https://host/<key>/ still work.
+	full := base.JoinPath(path)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, full.String(), nil)
+	if err != nil {
+		return redact(err, full)
+	}
+	req.Header.Set("Accept", "application/json")
+	// Redact based on the configured URL, not the full one: the API path
+	// ("eth/v1/node/version") is public and should stay readable in errors.
+	// The full URL is still covered: host, configured path segments and
+	// query values are each redacted on their own.
+	return c.do(req, base, out)
+}
+
+// do sends req and decodes a JSON response into out. All errors are redacted.
+func (c *Client) do(req *http.Request, u *url.URL, out any) error {
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return redact(describeTransportError(req.Context(), err), u)
+	}
+	// defer runs when do returns, whichever return statement is taken.
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// The body is deliberately not included: provider error pages may
+		// contain the API key or other details we do not want in logs.
+		return fmt.Errorf("unexpected HTTP status %s", resp.Status)
+	}
+
+	dec := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes))
+	if err := dec.Decode(out); err != nil {
+		return redact(fmt.Errorf("decode response: %w", err), u)
+	}
+	return nil
+}
+
+// describeTransportError turns errors from http.Client.Do into short,
+// readable messages. It removes the *url.Error wrapper, whose message always
+// contains the full request URL.
+func describeTransportError(ctx context.Context, err error) error {
+	// errors.Is walks the whole chain of wrapped errors.
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errors.New("timeout")
+	}
+	if errors.Is(err, context.Canceled) {
+		return errors.New("canceled")
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
+	// errors.As finds the first error in the chain with the given type and
+	// stores it in the variable.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		if dnsErr.IsNotFound {
+			return errors.New("DNS lookup failed: host not found")
+		}
+		return errors.New("DNS lookup failed")
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return errors.New("timeout")
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		// opErr.Err is e.g. "connect: connection refused", without address.
+		return fmt.Errorf("connection failed: %v", opErr.Err)
+	}
+
+	var urlErr *url.Error
+	if errors.As(err, &urlErr) {
+		return fmt.Errorf("request failed: %v", urlErr.Err)
+	}
+	return fmt.Errorf("request failed: %v", err)
+}
+
+// parseEndpoint parses a configured endpoint URL without leaking it in errors.
+func parseEndpoint(endpoint string) (*url.URL, error) {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, errors.New("invalid endpoint URL")
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return nil, errors.New("invalid endpoint URL: scheme must be http or https")
+	}
+	return u, nil
+}
+
+// redact removes every sensitive part of u from err's message: the full URL,
+// host, path segments, query and user info. It is a last line of defence
+// for messages we do not control (e.g. from the TLS stack or the server).
+//
+// The returned error no longer wraps err, so errors.Is/As cannot reach the
+// original (which may contain the URL).
+func redact(err error, u *url.URL) error {
+	if err == nil || u == nil {
+		return err
+	}
+	msg := err.Error()
+
+	var secrets []string
+	add := func(s string) {
+		if len(s) >= 3 { // avoid replacing trivial strings such as "v1"
+			secrets = append(secrets, s)
+		}
+	}
+	add(u.String())
+	add(u.Redacted())
+	add(u.Host)
+	add(u.Hostname())
+	add(u.RawQuery)
+	if u.User != nil {
+		add(u.User.String())
+		add(u.User.Username())
+		if p, ok := u.User.Password(); ok {
+			add(p)
+		}
+	}
+	add(strings.Trim(u.EscapedPath(), "/"))
+	for _, seg := range strings.Split(u.EscapedPath(), "/") {
+		add(seg)
+	}
+	for _, values := range u.Query() {
+		for _, v := range values {
+			add(v)
+		}
+	}
+	// Longest first, so the full URL is replaced before its parts.
+	slices.SortFunc(secrets, func(a, b string) int { return len(b) - len(a) })
+	for _, s := range secrets {
+		msg = strings.ReplaceAll(msg, s, "[redacted]")
+	}
+	return errors.New(msg)
+}

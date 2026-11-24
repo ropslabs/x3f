@@ -114,7 +114,13 @@ func validateURL(raw string) error {
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("invalid URL: %w", err)
+		// The *url.Error message contains the full URL, which may include an
+		// API key. Report only the underlying reason.
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
+		}
+		return fmt.Errorf("invalid URL: %v", err)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("scheme must be http or https, got %q", u.Scheme)
