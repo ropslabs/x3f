@@ -1,0 +1,7 @@
+nodes:
+  - name: mainnet-1
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+  - name: holesky-1
+    execution_url: https://holesky.example.internal:8545
+    beacon_url: https://holesky.example.internal:5052

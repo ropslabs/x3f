@@ -1,0 +1,22 @@
+# Binaries
+/x3f
+/dist/
+*.exe
+*.test
+*.out
+
+# Local configuration (may contain internal addresses); see x3f.example.yaml
+/x3f.yaml
+
+# Local cache (GitHub API responses)
+/.cache/
+
+# Environment files with secrets
+.env
+.env.*
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

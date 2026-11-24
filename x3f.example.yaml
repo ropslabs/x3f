@@ -1,0 +1,12 @@
+# x3f example configuration.
+# Copy to x3f.yaml and adjust. x3f.yaml is git-ignored.
+#
+# Secrets (GitHub token, Telegram bot token) do NOT belong here;
+# they are read from environment variables.
+
+nodes:
+  - name: mainnet-1
+    # Execution client JSON-RPC (Geth, Reth, Nethermind, Erigon, Besu)
+    execution_url: http://localhost:8545
+    # Consensus client beacon API (Lighthouse, Prysm, Teku, Nimbus, Lodestar, Grandine)
+    beacon_url: http://localhost:5052
