@@ -39,7 +39,8 @@ Goal: for each configured node, report whether its clients are up to date, wheth
 cmd/x3f/              CLI entry point
 internal/config/      load and validate x3f.yaml
 internal/ethereum/    query clients for version and sync status, parse version strings
-internal/releases/    GitHub releases and security advisories
+internal/releases/    GitHub releases (with disk cache) and security advisories, version comparison
+internal/status/      green / yellow / red rules and findings
 internal/forks/       load and evaluate forks.yaml
 internal/notify/      Telegram
 internal/*/testdata/  per-package test fixtures (e.g. recorded API responses), with their source noted

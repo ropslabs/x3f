@@ -41,6 +41,67 @@ Blockchain node operators have the same problem plus hard deadlines. If a node i
 
 Built with solo stakers and small validator teams in mind, people who run nodes without an ops team behind them.
 
+## Usage (preview)
+
+> What works today: client versions, sync status and comparison with the latest stable GitHub release. Fork readiness, security advisories and alerts are not built yet.
+
+Build the binary (requires Go) and describe your nodes in `x3f.yaml` (see [`x3f.example.yaml`](x3f.example.yaml)):
+
+```sh
+go build -o x3f ./cmd/x3f
+./x3f -config x3f.yaml
+```
+
+```
+STATUS  NODE       EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC
+OK      mainnet-1  Geth 1.17.10 (stable)         synced   Lighthouse 8.3.3            synced
+CRIT    hoodi-1    Besu 23.1.1 (dev) -> 26.11.2  synced   Nimbus 26.10.2 (stateofus)  syncing (1 slot behind), optimistic, EL offline
+
+Findings:
+  CRIT  hoodi-1 execution: Besu dev build of 23.1.1 ("dev"): stable 23.1.1 released 1357 days ago; latest 26.11.2 (grace period 30 days)
+  WARN  hoodi-1 consensus sync: syncing, 1 slot behind
+  WARN  hoodi-1 consensus sync: optimistic: head not yet verified by the execution client
+  CRIT  hoodi-1 consensus sync: execution client offline (reported by the consensus client)
+
+Status: CRIT (1 OK, 0 WARN, 1 CRIT)
+```
+
+(Real output from 2026-11-24: mock nodes replaying the test fixtures, release data from the live GitHub API.)
+
+Endpoint URLs are never printed, only node names, because provider URLs often contain API keys.
+
+### Status rules
+
+| | Green | Yellow | Red |
+|---|---|---|---|
+| **Version** | latest stable release (or newer) | behind, but within the grace period; pre-release, dev build or unrecognized suffix; client not recognized; latest release unknown | behind for longer than the grace period (default 30 days, counted from the first newer stable release); client unreachable |
+| **Sync** | synced | indexing; optimistic; up to 32 blocks/slots behind | execution client offline; more than 32 blocks/slots behind |
+
+If GitHub is unreachable, cached release data younger than 7 days is used with a note only; older or missing data turns the status yellow.
+
+### Flags
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `-config` | `x3f.yaml` | path to the config file |
+| `-timeout` | `10s` | timeout per request |
+| `-grace-days` | `30` | days a client may lag behind the latest stable release before it turns red |
+| `-cache-dir` | `~/.cache/x3f` | where GitHub release data is cached (empty disables the cache) |
+| `-cache-ttl` | `1h` | how long cached data is used without asking GitHub |
+
+Environment: `GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `NO_COLOR` disables colors.
+
+### Exit codes
+
+x3f follows the [Nagios plugin convention](https://nagios-plugins.org/doc/guidelines.html), so it can be used as a monitoring check directly:
+
+| Code | Meaning |
+|---|---|
+| `0` | OK: everything is green |
+| `1` | WARNING: at least one yellow finding |
+| `2` | CRITICAL: at least one red finding |
+| `3` | UNKNOWN: x3f could not run (invalid flags or config) |
+
 ## Design principles
 
 - **Plug in, don't replace.** x3f works alongside the tools you already run: metrics for Prometheus, dashboards for Grafana, tickets in GitHub.

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"sync"
 	"text/tabwriter"
@@ -11,6 +13,8 @@ import (
 
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/status"
 )
 
 // layerResult holds what we learned about one client (execution or
@@ -103,49 +107,185 @@ func withTimeout[T any](ctx context.Context, timeout time.Duration, endpoint str
 	return fetch(ctx, endpoint)
 }
 
-// printResults writes the results as an aligned table, followed by a list of
-// errors. It reports how many requests failed.
-func printResults(w io.Writer, results []nodeResult) (failed int, err error) {
-	// tabwriter aligns tab-separated columns. Arguments: minwidth, tabwidth,
-	// padding, padchar, flags.
-	tw := tabwriter.NewWriter(w, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "NODE\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC")
-	for _, r := range results {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n",
-			r.Name,
-			formatVersion(r.Execution.Version, r.Execution.VersionErr),
-			formatSync(r.Execution.SyncSkipped, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
-			formatVersion(r.Consensus.Version, r.Consensus.VersionErr),
-			formatSync(r.Consensus.SyncSkipped, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
-		)
-	}
-	if err := tw.Flush(); err != nil {
-		return 0, err
-	}
-
-	var lines []string
-	add := func(node, what string, err error) {
-		if err != nil {
-			lines = append(lines, fmt.Sprintf("  %s %s: %v", node, what, err))
-		}
-	}
-	for _, r := range results {
-		add(r.Name, "execution", r.Execution.VersionErr)
-		add(r.Name, "execution sync", r.Execution.SyncErr)
-		add(r.Name, "consensus", r.Consensus.VersionErr)
-		add(r.Name, "consensus sync", r.Consensus.SyncErr)
-	}
-	if len(lines) > 0 {
-		fmt.Fprintln(w, "\nErrors:")
-		for _, l := range lines {
-			fmt.Fprintln(w, l)
-		}
-	}
-	return len(lines), nil
+// releaseData is the outcome of fetching one repository's releases.
+type releaseData struct {
+	result *releases.Result // nil if no data could be obtained
+	err    error
 }
 
-// formatVersion renders a version cell, e.g. "Geth 1.17.10 (stable)".
-func formatVersion(v ethereum.ClientVersion, err error) string {
+// fetchReleases fetches the releases of every client that was detected,
+// once per repository and concurrently.
+func fetchReleases(ctx context.Context, src *releases.Source, results []nodeResult, timeout time.Duration) map[releases.Repo]releaseData {
+	var repos []releases.Repo
+	for _, r := range results {
+		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
+			if repo, ok := releases.RepoFor(v.Client); ok && !slices.Contains(repos, repo) {
+				repos = append(repos, repo)
+			}
+		}
+	}
+
+	data := make(map[releases.Repo]releaseData, len(repos))
+	// Several goroutines write to the same map, which Go does not allow
+	// without synchronisation; the mutex makes the writes take turns.
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, repo := range repos {
+		wg.Go(func() {
+			ctx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			res, err := src.Releases(ctx, repo)
+			d := releaseData{err: err}
+			if err == nil {
+				d.result = &res
+			}
+			mu.Lock()
+			data[repo] = d
+			mu.Unlock()
+		})
+	}
+	wg.Wait()
+	return data
+}
+
+// row is one table row with its assessments.
+type row struct {
+	node       string
+	level      status.Level
+	cells      [4]string // execution, EL sync, consensus, CL sync
+	findings   [4]status.Assessment
+	layerNames [4]string
+}
+
+// assess evaluates all results. It returns the rows and the overall level.
+func assess(results []nodeResult, rel map[releases.Repo]releaseData, now time.Time, grace time.Duration) ([]row, status.Level) {
+	versionInput := func(v ethereum.ClientVersion, err error) status.VersionInput {
+		in := status.VersionInput{Version: v, Err: err, Now: now, Grace: grace}
+		if repo, ok := releases.RepoFor(v.Client); ok {
+			d := rel[repo]
+			in.Releases, in.ReleasesErr = d.result, d.err
+		}
+		return in
+	}
+
+	overall := status.OK
+	rows := make([]row, 0, len(results))
+	for _, r := range results {
+		ev := versionInput(r.Execution.Version, r.Execution.VersionErr)
+		cv := versionInput(r.Consensus.Version, r.Consensus.VersionErr)
+		a := [4]status.Assessment{
+			status.AssessVersion(ev),
+			status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.SyncSkipped, Err: r.Execution.SyncErr}, r.Execution.Sync),
+			status.AssessVersion(cv),
+			status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.SyncSkipped, Err: r.Consensus.SyncErr}, r.Consensus.Sync),
+		}
+		rw := row{
+			node: r.Name,
+			cells: [4]string{
+				formatVersion(r.Execution.Version, r.Execution.VersionErr, ev),
+				formatSync(r.Execution.SyncSkipped, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
+				formatVersion(r.Consensus.Version, r.Consensus.VersionErr, cv),
+				formatSync(r.Consensus.SyncSkipped, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
+			},
+			findings:   a,
+			layerNames: [4]string{"execution", "execution sync", "consensus", "consensus sync"},
+		}
+		for _, x := range a {
+			rw.level = max(rw.level, x.Level)
+		}
+		overall = max(overall, rw.level)
+		rows = append(rows, rw)
+	}
+	return rows, overall
+}
+
+// ANSI escape codes for terminal colors.
+const (
+	colorReset  = "\x1b[0m"
+	colorGreen  = "\x1b[32m"
+	colorYellow = "\x1b[33m"
+	colorRed    = "\x1b[31m"
+)
+
+func colorFor(l status.Level) string {
+	switch l {
+	case status.OK:
+		return colorGreen
+	case status.Warn:
+		return colorYellow
+	default:
+		return colorRed
+	}
+}
+
+// label is the text for a level; findings with level OK are notes.
+func label(l status.Level, finding bool) string {
+	if finding && l == status.OK {
+		return "NOTE"
+	}
+	return l.String()
+}
+
+// paint wraps s in the color for l, if colors are enabled.
+func paint(s string, l status.Level, color bool) string {
+	if !color {
+		return s
+	}
+	return colorFor(l) + s + colorReset
+}
+
+// printReport writes the table, the findings and a summary line.
+func printReport(w io.Writer, rows []row, overall status.Level, color bool) error {
+	// tabwriter aligns tab-separated columns. Arguments: minwidth, tabwidth,
+	// padding, padchar, flags.
+	var table bytes.Buffer
+	tw := tabwriter.NewWriter(&table, 0, 8, 2, ' ', 0)
+	fmt.Fprintln(tw, "STATUS\tNODE\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC")
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.level, r.node, strings.Join(r.cells[:], "\t"))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+
+	// Colors are added after alignment: escape codes have no visible width,
+	// but tabwriter would count them and misalign the columns. The status
+	// word is at the start of each row, so it can be colored afterwards.
+	lines := strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n")
+	fmt.Fprintln(w, lines[0])
+	for i, line := range lines[1:] {
+		l := rows[i].level
+		word := l.String()
+		fmt.Fprintln(w, paint(word, l, color)+strings.TrimPrefix(line, word))
+	}
+
+	var findings []string
+	counts := map[status.Level]int{}
+	for _, r := range rows {
+		counts[r.level]++
+		for i, a := range r.findings {
+			for _, f := range a.Findings {
+				lbl := fmt.Sprintf("%-4s", label(f.Level, true))
+				findings = append(findings, fmt.Sprintf("  %s  %s %s: %s",
+					paint(lbl, f.Level, color), r.node, r.layerNames[i], f.Message))
+			}
+		}
+	}
+	if len(findings) > 0 {
+		fmt.Fprintln(w, "\nFindings:")
+		for _, f := range findings {
+			fmt.Fprintln(w, f)
+		}
+	}
+
+	fmt.Fprintf(w, "\nStatus: %s (%d OK, %d WARN, %d CRIT)\n",
+		paint(overall.String(), overall, color), counts[status.OK], counts[status.Warn], counts[status.Crit])
+	return nil
+}
+
+// formatVersion renders a version cell, e.g. "Geth 1.17.10 (stable)", with
+// the latest release appended when the client is behind.
+func formatVersion(v ethereum.ClientVersion, err error, in status.VersionInput) string {
 	if err != nil {
 		return "ERROR"
 	}
@@ -156,6 +296,13 @@ func formatVersion(v ethereum.ClientVersion, err error) string {
 	s := v.Client.String() + " " + v.Version
 	if v.Suffix != "" {
 		s += " (" + v.Suffix + ")"
+	}
+	if latest, ok := status.Latest(in); ok {
+		running, _ := releases.ParseVersion(v.Version)
+		running.Suffix = v.Suffix
+		if releases.Compare(v.Client, running, latest) < 0 {
+			s += " -> " + latest.String()
+		}
 	}
 	return s
 }

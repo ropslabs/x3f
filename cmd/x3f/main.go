@@ -1,5 +1,5 @@
 // Command x3f reports whether Ethereum node clients are up to date,
-// affected by known advisories and ready for the next hard fork.
+// in sync, affected by known advisories and ready for the next hard fork.
 package main
 
 import (
@@ -10,54 +10,161 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"time"
 
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/status"
 )
+
+// Exit codes follow the Nagios plugin convention, so monitoring systems can
+// use x3f as a check directly.
+const (
+	exitOK      = 0 // everything green
+	exitWarn    = 1 // at least one yellow
+	exitCrit    = 2 // at least one red
+	exitUnknown = 3 // x3f itself could not run (bad flags, bad config)
+)
+
+const usageText = `Usage: x3f [flags]
+
+x3f queries the Ethereum nodes listed in the config file (read-only) and
+reports client versions, sync status and whether the clients are behind
+their latest stable GitHub release.
+
+Flags:
+`
+
+const helpFooter = `
+Exit codes (Nagios plugin convention):
+  0  OK       everything is green
+  1  WARNING  at least one yellow finding
+  2  CRITICAL at least one red finding
+  3  UNKNOWN  x3f could not run (invalid flags or config)
+
+Environment:
+  GITHUB_TOKEN  optional GitHub token; raises the API rate limit from 60 to
+                5000 requests per hour. Never stored or printed.
+  NO_COLOR      disables colored output when set to a non-empty value.
+`
+
+// env bundles what run needs from the outside world, so tests can replace
+// it: the HTTP client for nodes, the GitHub API location and token, the
+// clock and whether to use colors.
+type env struct {
+	client        *ethereum.Client
+	githubBaseURL string
+	githubToken   string
+	now           func() time.Time
+	color         bool
+}
 
 func main() {
 	// NotifyContext returns a context that is canceled on Ctrl+C, so
 	// running requests stop cleanly instead of being killed mid-way.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
 
-	// main only translates the result of run into an exit code. Keeping the
-	// logic in run makes it testable and lets deferred calls run before exit
-	// (os.Exit skips defers, hence the explicit stop()).
-	if err := run(ctx, os.Args[1:], os.Stdout, ethereum.NewClient(nil)); err != nil {
-		fmt.Fprintln(os.Stderr, "x3f:", err)
-		stop()
-		os.Exit(1)
-	}
+	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, env{
+		client:        ethereum.NewClient(nil),
+		githubBaseURL: releases.DefaultBaseURL,
+		githubToken:   os.Getenv("GITHUB_TOKEN"),
+		now:           time.Now,
+		color:         useColor(os.Stdout),
+	})
+	// os.Exit skips deferred calls, so stop is called explicitly.
+	stop()
+	os.Exit(code)
 }
 
-func run(ctx context.Context, args []string, out io.Writer, client *ethereum.Client) error {
+// useColor reports whether f is a terminal and NO_COLOR is not set.
+// See https://no-color.org.
+func useColor(f *os.File) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	info, err := f.Stat()
+	// A character device is a terminal; files and pipes are not.
+	return err == nil && info.Mode()&os.ModeCharDevice != 0
+}
+
+// run executes x3f and returns the exit code.
+func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) int {
 	// A dedicated FlagSet instead of the global flag functions, so run can
 	// be called with arbitrary arguments (e.g. from tests).
 	fs := flag.NewFlagSet("x3f", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), usageText)
+		fs.PrintDefaults()
+		fmt.Fprint(fs.Output(), helpFooter)
+	}
 	configPath := fs.String("config", "x3f.yaml", "path to the config file")
 	timeout := fs.Duration("timeout", 10*time.Second, "timeout per request, e.g. 5s")
+	graceDays := fs.Int("grace-days", 30, "days a client may lag behind the latest stable release before it turns red")
+	cacheDir := fs.String("cache-dir", defaultCacheDir(), "directory for cached GitHub data (empty disables the cache)")
+	cacheTTL := fs.Duration("cache-ttl", time.Hour, "how long cached GitHub data is used without asking GitHub")
+
 	if err := fs.Parse(args); err != nil {
-		return err
+		if errors.Is(err, flag.ErrHelp) {
+			return exitOK // -help was requested; usage is already printed
+		}
+		return exitUnknown // the flag package already printed the error
+	}
+
+	fail := func(format string, a ...any) int {
+		fmt.Fprintf(stderr, "x3f: "+format+"\n", a...)
+		return exitUnknown
 	}
 	if *timeout <= 0 {
-		return errors.New("-timeout must be positive")
+		return fail("-timeout must be positive")
+	}
+	if *graceDays < 0 {
+		return fail("-grace-days must not be negative")
+	}
+	if *cacheTTL < 0 {
+		return fail("-cache-ttl must not be negative")
 	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
-		return err
+		return fail("%v", err)
 	}
 
-	results := checkNodes(ctx, client, cfg.Nodes, *timeout)
-	failed, err := printResults(out, results)
+	results := checkNodes(ctx, e.client, cfg.Nodes, *timeout)
+
+	src := &releases.Source{
+		BaseURL:  e.githubBaseURL,
+		Token:    e.githubToken,
+		CacheDir: *cacheDir,
+		TTL:      *cacheTTL,
+		Now:      e.now,
+	}
+	rel := fetchReleases(ctx, src, results, *timeout)
+
+	grace := time.Duration(*graceDays) * 24 * time.Hour
+	rows, overall := assess(results, rel, e.now(), grace)
+	if err := printReport(stdout, rows, overall, e.color); err != nil {
+		return fail("%v", err)
+	}
+
+	switch overall {
+	case status.OK:
+		return exitOK
+	case status.Warn:
+		return exitWarn
+	default:
+		return exitCrit
+	}
+}
+
+// defaultCacheDir returns the per-user cache directory, e.g. ~/.cache/x3f
+// on Linux (respecting XDG_CACHE_HOME). Empty if it cannot be determined.
+func defaultCacheDir() string {
+	dir, err := os.UserCacheDir()
 	if err != nil {
-		return err
+		return ""
 	}
-	if failed > 0 {
-		// A non-zero exit code lets cron jobs and scripts notice failures.
-		return fmt.Errorf("%d request(s) failed", failed)
-	}
-	return nil
+	return filepath.Join(dir, "x3f")
 }
