@@ -27,9 +27,9 @@ func readFixture(t *testing.T, name string) []byte {
 	return data
 }
 
-// rpcServer starts a mock JSON-RPC server that checks the request and
-// replies with body. t.Cleanup stops it when the test ends.
-func rpcServer(t *testing.T, body []byte) *httptest.Server {
+// rpcServer starts a mock JSON-RPC server that checks the request method
+// and replies with body. t.Cleanup stops it when the test ends.
+func rpcServer(t *testing.T, wantMethod string, body []byte) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req rpcRequest
@@ -39,7 +39,7 @@ func rpcServer(t *testing.T, body []byte) *httptest.Server {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			t.Errorf("decode request: %v", err)
 		}
-		if req.JSONRPC != "2.0" || req.Method != "web3_clientVersion" {
+		if req.JSONRPC != "2.0" || req.Method != wantMethod {
 			t.Errorf("unexpected request %+v", req)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -100,7 +100,7 @@ func TestExecutionVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {
-			srv := rpcServer(t, readFixture(t, filepath.Join("execution", tt.fixture)))
+			srv := rpcServer(t, "web3_clientVersion", readFixture(t, filepath.Join("execution", tt.fixture)))
 
 			got, err := NewClient(nil).ExecutionVersion(context.Background(), srv.URL)
 			if err != nil {
@@ -363,4 +363,61 @@ func TestErrorsDoNotLeakURL(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestIsTransportError(t *testing.T) {
+	refused := httptest.NewServer(http.NotFoundHandler())
+	refusedURL := refused.URL
+	refused.Close()
+
+	dnsFail := NewClient(&http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return nil, &net.OpError{Op: "dial", Net: network, Err: &net.DNSError{Err: "no such host", Name: "x.example", IsNotFound: true}}
+		},
+	}})
+	rpcError := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(readFixture(t, filepath.Join("execution", "error-method-not-found.json")))
+	}))
+	defer rpcError.Close()
+	status500 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer status500.Close()
+	badJSON := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "not json")
+	}))
+	defer badJSON.Close()
+	hanging := hangingServer(t)
+
+	tests := []struct {
+		name   string
+		client *Client
+		url    string
+		ctx    time.Duration // 0 means no timeout
+		want   bool
+	}{
+		{"connection refused", NewClient(nil), refusedURL, 0, true},
+		{"dns failure", dnsFail, "http://x.example", 0, true},
+		{"timeout", NewClient(nil), hanging.URL, 50 * time.Millisecond, true},
+		{"json-rpc error", NewClient(nil), rpcError.URL, 0, false},
+		{"http 500", NewClient(nil), status500.URL, 0, false},
+		{"malformed response", NewClient(nil), badJSON.URL, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			if tt.ctx > 0 {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithTimeout(ctx, tt.ctx)
+				defer cancel()
+			}
+			_, err := tt.client.ExecutionVersion(ctx, tt.url)
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			if got := IsTransportError(err); got != tt.want {
+				t.Errorf("IsTransportError(%v) = %v, want %v", err, got, tt.want)
+			}
+		})
+	}
 }

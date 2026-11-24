@@ -125,7 +125,9 @@ func (c *Client) callRPC(ctx context.Context, endpoint, method string, result an
 		// echoes the request URL.
 		return redact(fmt.Errorf("JSON-RPC error %d: %s", resp.Error.Code, resp.Error.Message), u)
 	}
-	if len(resp.Result) == 0 {
+	// A missing result and an explicit null are both invalid here; decoding
+	// null would silently leave result at its zero value (e.g. false).
+	if len(resp.Result) == 0 || string(resp.Result) == "null" {
 		return errors.New("JSON-RPC response has neither result nor error")
 	}
 	if err := json.Unmarshal(resp.Result, result); err != nil {
@@ -159,7 +161,7 @@ func (c *Client) getBeacon(ctx context.Context, endpoint, path string, out any) 
 func (c *Client) do(req *http.Request, u *url.URL, out any) error {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return redact(describeTransportError(req.Context(), err), u)
+		return &TransportError{err: redact(describeTransportError(req.Context(), err), u)}
 	}
 	// defer runs when do returns, whichever return statement is taken.
 	defer resp.Body.Close()
@@ -175,6 +177,29 @@ func (c *Client) do(req *http.Request, u *url.URL, out any) error {
 		return redact(fmt.Errorf("decode response: %w", err), u)
 	}
 	return nil
+}
+
+// TransportError means the endpoint could not be reached or did not answer
+// in time: timeout, connection failure, DNS failure, cancellation. Errors
+// the server reported (HTTP status, JSON-RPC error, malformed response) are
+// not TransportErrors.
+//
+// Its message is already redacted.
+type TransportError struct {
+	err error
+}
+
+func (e *TransportError) Error() string { return e.err.Error() }
+
+// Unwrap lets errors.Is/As look inside. The wrapped error is the redacted
+// one, so this does not expose the URL.
+func (e *TransportError) Unwrap() error { return e.err }
+
+// IsTransportError reports whether err (or any error it wraps) is a
+// TransportError.
+func IsTransportError(err error) bool {
+	var te *TransportError
+	return errors.As(err, &te)
 }
 
 // describeTransportError turns errors from http.Client.Do into short,

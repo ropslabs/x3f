@@ -164,3 +164,60 @@ Old format, but it is the official example.
   served by
   [http_api/src/standard.rs L2613-L2619](https://github.com/grandinetech/grandine/blob/70a5c7ea6fbf07c22ecea09b7cdd71c3af93cbb0/http_api/src/standard.rs#L2613-L2619).
 - Filled in: version 2.0.6, commit `70a5c7ea` = tag 2.0.6.
+
+## Sync status
+
+No client documentation checked (Lighthouse book, Nimbus guide) contains a
+literal response for these endpoints, so apart from the spec example all sync
+fixtures are derived. To avoid inventing numbers, block numbers reuse the
+execution-apis example values (`0x0`, `0x1518`, `0x9567a3`) and slots reuse the
+beacon-APIs `Uint64` example value (`"1"`).
+
+### execution/syncing-false.json — derived
+
+`"result": false` — "Should always return false if not syncing" in the
+`SyncingStatus` schema,
+[execution-apis src/schemas/client.yaml L1-L19](https://github.com/ethereum/execution-apis/blob/1ca0818569467cff85b7f41372f22e728d5daa14/src/schemas/client.yaml#L1-L19);
+Geth returns it once sync is done
+([internal/ethapi/api.go L164-L167](https://github.com/ethereum/go-ethereum/blob/1df30b18d9ed35ee9d28ffd4648442c2204554ad/internal/ethapi/api.go#L164-L167)).
+
+### execution/syncing-spec-example.json — literal
+
+Result object `{"startingBlock":"0x0","currentBlock":"0x1518","highestBlock":"0x9567a3"}`
+from the `eth_syncing` example in
+[execution-apis src/eth/client.yaml L14-L29](https://github.com/ethereum/execution-apis/blob/1ca0818569467cff85b7f41372f22e728d5daa14/src/eth/client.yaml#L14-L29).
+
+### execution/syncing-geth.json — derived
+
+Field set exactly as built by Geth's `Syncing()`
+([internal/ethapi/api.go L169-L192](https://github.com/ethereum/go-ethereum/blob/1df30b18d9ed35ee9d28ffd4648442c2204554ad/internal/ethapi/api.go#L169-L192)).
+Filled in: block numbers from the spec example; all Geth-specific counters are `0x0` placeholders.
+
+### execution/syncing-geth-indexing.json — derived
+
+Same field set. Geth still reports syncing when `currentBlock >= highestBlock`
+but an index is incomplete (`SyncProgress.Done`,
+[interfaces.go L153-L158](https://github.com/ethereum/go-ethereum/blob/1df30b18d9ed35ee9d28ffd4648442c2204554ad/interfaces.go#L153-L158)).
+Filled in: `currentBlock` = `highestBlock` = `0x9567a3`; `txIndexRemainingBlocks` and
+`txIndexFinishedBlocks` = `0x1518` (placeholder, reusing an example value); everything else `0x0`.
+
+### consensus/syncing-spec-example.json — derived
+
+`{"data":{"head_slot":"1","sync_distance":"1","is_syncing":true,"is_optimistic":true,"el_offline":true}}`
+
+- Structure and required fields from
+  [beacon-APIs v4.0.0 apis/node/syncing.yaml](https://github.com/ethereum/beacon-APIs/blob/88fc9402c6a1821b6e9ae4e3b8ae0a22f1141203/apis/node/syncing.yaml);
+  `Uint64` is a decimal string with example `"1"`
+  ([types/primitive.yaml L31-L33](https://github.com/ethereum/beacon-APIs/blob/88fc9402c6a1821b6e9ae4e3b8ae0a22f1141203/types/primitive.yaml#L31-L33)).
+- Filled in: all booleans `true` to exercise every flag.
+
+### consensus/syncing-synced.json — derived
+
+Same structure; `sync_distance` `"0"` ("0 if synced" per the spec), all booleans `false`.
+
+### consensus/syncing-nimbus-pre-bellatrix.json — derived
+
+Nimbus omits `is_optimistic` before the Bellatrix fork epoch and `el_offline`
+before Capella
+([beacon_chain/rpc/rest_node_api.nim L261-L290](https://github.com/status-im/nimbus-eth2/blob/0abc0dd0fc0750a8875c49089d074f7d7197b62c/beacon_chain/rpc/rest_node_api.nim#L261-L290)),
+so both are missing here. Filled in: synced values as above.
