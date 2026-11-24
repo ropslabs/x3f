@@ -74,7 +74,7 @@ Endpoint URLs are never printed, only node names, because provider URLs often co
 
 | | Green | Yellow | Red |
 |---|---|---|---|
-| **Version** | latest stable release (or newer) | behind, but within the grace period; pre-release, dev build or unrecognized suffix; client not recognized; latest release unknown | behind for longer than the grace period (default 30 days, counted from the first newer stable release); client unreachable |
+| **Version** | latest stable release (or newer, but not newer than every known release) | behind, but within the grace period; pre-release, dev build or unrecognized suffix; newer than every known release (proxy or custom build; x3f re-checks GitHub first); client not recognized; latest release unknown | behind for longer than the grace period (default 30 days, counted from the first newer stable release); client unreachable |
 | **Sync** | synced | indexing; optimistic; up to 32 blocks/slots behind | execution client offline; more than 32 blocks/slots behind |
 
 If GitHub is unreachable, cached release data younger than 7 days is used with a note only; older or missing data turns the status yellow.

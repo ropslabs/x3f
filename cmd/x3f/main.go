@@ -142,6 +142,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		Now:      e.now,
 	}
 	rel := fetchReleases(ctx, src, results, *timeout)
+	refreshIfAhead(ctx, src, results, rel, *timeout)
 
 	grace := time.Duration(*graceDays) * 24 * time.Hour
 	rows, overall := assess(results, rel, e.now(), grace)

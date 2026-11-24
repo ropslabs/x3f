@@ -3,9 +3,11 @@
 //
 // Rules (agreed for build step 3):
 //
-//	Version  green:  latest stable release or newer
+//	Version  green:  latest stable release or newer, but not newer than
+//	                 every known release
 //	         yellow: outdated within the grace period; pre-release, dev build
-//	                 or unrecognized suffix; client or version not recognized;
+//	                 or unrecognized suffix; newer than every known release
+//	                 (proxy or custom build); client or version not recognized;
 //	                 latest release unknown or release data older than 7 days;
 //	                 version request rejected by the server
 //	         red:    outdated longer than the grace period (counted from the
@@ -158,6 +160,16 @@ func AssessVersion(in VersionInput) Assessment {
 		return a
 	}
 	if !outdated {
+		// A release-type version above every known release (pre-releases
+		// included) matches nothing on GitHub. Seen live: dRPC answers
+		// "Geth/v10.0.0/drpc". The caller refreshes the release data
+		// before assessing, so a just-published release does not end up
+		// here. Pre-releases and dev builds ahead of the latest release
+		// are expected and already yellow.
+		if kind == releases.KindRelease && releases.NewerThanAll(v.Client, rels, running) {
+			newest, _ := releases.NewestKnown(v.Client, rels)
+			a.add(Warn, "%s is newer than any known release (newest %s): proxy or custom build?", name, newest)
+		}
 		return a
 	}
 	if missing.PublishedAt.IsZero() {

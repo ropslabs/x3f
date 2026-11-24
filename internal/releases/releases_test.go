@@ -186,3 +186,33 @@ func TestFirstMissing(t *testing.T) {
 		})
 	}
 }
+
+func TestNewestKnown(t *testing.T) {
+	repo, _ := RepoFor(ethereum.Lighthouse)
+	rels := loadFixture(t, repo)
+	// The recorded Lighthouse data contains the pre-release v8.4.0-rc.0,
+	// newer than the latest stable v8.3.3.
+	newest, ok := NewestKnown(ethereum.Lighthouse, rels)
+	if !ok || newest.String() != "8.4.0-rc.0" {
+		t.Fatalf("NewestKnown = %s, %v; want 8.4.0-rc.0", newest, ok)
+	}
+
+	tests := []struct {
+		running string
+		want    bool
+	}{
+		{"8.3.3", false},
+		{"8.4.0-rc.0", false}, // equal to a known pre-release
+		{"8.4.0", true},       // final release not in the data
+		{"10.0.0", true},
+	}
+	for _, tt := range tests {
+		v, _ := ParseVersion(tt.running)
+		if got := NewerThanAll(ethereum.Lighthouse, rels, v); got != tt.want {
+			t.Errorf("NewerThanAll(%s) = %v, want %v", tt.running, got, tt.want)
+		}
+	}
+	if NewerThanAll(ethereum.Lighthouse, nil, Version{Major: 1}) {
+		t.Error("NewerThanAll with no data must be false")
+	}
+}

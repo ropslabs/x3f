@@ -130,6 +130,13 @@ func TestAssessVersion(t *testing.T) {
 			wantMsgs: []string{`Prysm build of 7.3.2 with unrecognized suffix ("mekong"): stable 7.3.2 released 2 days ago; latest 7.3.2 (grace period 30 days)`},
 		},
 		{
+			// Recorded live: dRPC's proxy answers "Geth/v10.0.0/drpc".
+			name:      "version newer than any known release",
+			in:        VersionInput{Version: geth("Geth/v10.0.0/drpc"), Releases: fresh},
+			wantLevel: Warn,
+			wantMsgs:  []string{"Geth 10.0.0 is newer than any known release (newest 1.17.10): proxy or custom build?"},
+		},
+		{
 			name:      "nimbus codename is fine",
 			in:        VersionInput{Version: geth("Nimbus/v26.10.2-0abc0d-stateofus"), Releases: &releases.Result{Releases: []releases.Release{{Tag: "v26.10.2"}}, FetchedAt: now}},
 			wantLevel: OK,

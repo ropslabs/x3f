@@ -72,11 +72,14 @@ type fakeGitHub struct {
 	mu       sync.Mutex
 	requests map[string]int
 	auth     []string
+	// override replaces the recorded body for a path, e.g. to simulate a
+	// release list from before the newest release.
+	override map[string][]byte
 }
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
 	t.Helper()
-	gh := &fakeGitHub{requests: map[string]int{}}
+	gh := &fakeGitHub{requests: map[string]int{}, override: map[string][]byte{}}
 	gh.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gh.mu.Lock()
 		gh.requests[r.URL.Path]++
@@ -84,6 +87,13 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 		gh.mu.Unlock()
 		if gh.down.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		gh.mu.Lock()
+		body, overridden := gh.override[r.URL.Path]
+		gh.mu.Unlock()
+		if overridden {
+			w.Write(body)
 			return
 		}
 		// /repos/{owner}/{repo}/releases -> {owner}_{repo}.json
@@ -484,4 +494,84 @@ func TestFormatConsensusSync(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A node reporting a version newer than every cached release triggers an
+// immediate refresh of that repository, ignoring the TTL.
+func TestRunRefreshesCacheForNewRelease(t *testing.T) {
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	const gethPath = "/repos/ethereum/go-ethereum/releases"
+
+	// GitHub's view before v1.17.10 existed: the recorded list without its
+	// first entry.
+	var all []releases.Release
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "releases", "testdata", "github", "ethereum_go-ethereum.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &all); err != nil || all[0].Tag != "v1.17.10" {
+		t.Fatalf("unexpected fixture: %v", err)
+	}
+	before, _ := json.Marshal(all[1:])
+	gh.override[gethPath] = before
+
+	path := writeConfig(t, "nodes:\n  - {name: a, execution_url: "+m.gethSynced.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+	cache := t.TempDir()
+	runOnce := func() (int, string) {
+		var out bytes.Buffer
+		code := run(context.Background(), []string{"-config", path, "-cache-dir", cache}, &out, &out, testEnv(gh, now))
+		return code, out.String()
+	}
+
+	// Run 1: GitHub really does not know 1.17.10 yet (fresh fetch, so no
+	// refresh): yellow.
+	code, out := runOnce()
+	if code != exitWarn || !strings.Contains(out, "Geth 1.17.10 is newer than any known release (newest 1.17.9)") {
+		t.Fatalf("run 1: exit %d\n%s", code, out)
+	}
+
+	// The release is published. Run 2 is within the cache TTL, but the
+	// node's version is ahead of the cache, so x3f asks GitHub again.
+	gh.mu.Lock()
+	delete(gh.override, gethPath)
+	gh.mu.Unlock()
+	code, out = runOnce()
+	if code != exitOK {
+		t.Errorf("run 2: exit %d, want 0\n%s", code, out)
+	}
+	gh.mu.Lock()
+	if n := gh.requests[gethPath]; n != 2 {
+		t.Errorf("go-ethereum requests = %d, want 2", n)
+	}
+	gh.mu.Unlock()
+}
+
+// The live-recorded dRPC answer stays yellow even after a refresh.
+func TestRunProxyVersion(t *testing.T) {
+	gh := newFakeGitHub(t)
+	drpc := mockClient(t, map[string][]byte{
+		"web3_clientVersion": fixture(t, "execution/live/proxy-drpc-mainnet.json"),
+		"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+	})
+	m := newMocks(t)
+	path := writeConfig(t, "nodes:\n  - {name: drpc, execution_url: "+drpc.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+	cache := t.TempDir()
+
+	var out bytes.Buffer
+	for i := 0; i < 2; i++ { // second run: from cache, then refreshed
+		out.Reset()
+		code := run(context.Background(), []string{"-config", path, "-cache-dir", cache}, &out, &out, testEnv(gh, now))
+		if code != exitWarn {
+			t.Errorf("run %d: exit %d, want 1\n%s", i+1, code, out.String())
+		}
+	}
+	if !strings.Contains(out.String(), "WARN  drpc execution: Geth 10.0.0 is newer than any known release (newest 1.17.10): proxy or custom build?") {
+		t.Errorf("missing proxy warning:\n%s", out.String())
+	}
+	gh.mu.Lock()
+	if n := gh.requests["/repos/ethereum/go-ethereum/releases"]; n != 2 {
+		t.Errorf("go-ethereum requests = %d, want 2 (fetch, then refresh on the cached run)", n)
+	}
+	gh.mu.Unlock()
 }

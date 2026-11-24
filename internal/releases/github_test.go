@@ -228,3 +228,27 @@ func TestReleasesFollowsRedirect(t *testing.T) {
 		t.Fatalf("got %d releases, err %v", len(res.Releases), err)
 	}
 }
+
+func TestRefreshIgnoresTTL(t *testing.T) {
+	f := newFakeGitHub(t)
+	c := &clock{t: time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)}
+	s := newSource(t, f, c)
+
+	res, err := s.Releases(context.Background(), geth)
+	if err != nil || res.Cached {
+		t.Fatalf("first fetch: cached=%v err=%v", res.Cached, err)
+	}
+	res, err = s.Releases(context.Background(), geth)
+	if err != nil || !res.Cached || f.requests.Load() != 1 {
+		t.Fatalf("cache hit: cached=%v err=%v requests=%d", res.Cached, err, f.requests.Load())
+	}
+
+	// Within the TTL, Refresh still asks GitHub, conditionally.
+	res, err = s.Refresh(context.Background(), geth)
+	if err != nil || res.Cached || f.requests.Load() != 2 {
+		t.Fatalf("refresh: cached=%v err=%v requests=%d", res.Cached, err, f.requests.Load())
+	}
+	if got := f.lastINM.Load(); got != `W/"abc123"` {
+		t.Errorf("refresh If-None-Match = %q, want the cached ETag", got)
+	}
+}

@@ -148,6 +148,37 @@ func fetchReleases(ctx context.Context, src *releases.Source, results []nodeResu
 	return data
 }
 
+// refreshIfAhead re-fetches, ignoring the TTL, every repository whose
+// cached data has no release as new as a version a node reports. Without
+// this, a release published after the last fetch would look like a proxy
+// or custom build until the cache expires.
+func refreshIfAhead(ctx context.Context, src *releases.Source, results []nodeResult, rel map[releases.Repo]releaseData, timeout time.Duration) {
+	var stale []releases.Repo
+	for _, r := range results {
+		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
+			repo, ok := releases.RepoFor(v.Client)
+			d := rel[repo]
+			if !ok || d.result == nil || !d.result.Cached || slices.Contains(stale, repo) {
+				continue
+			}
+			running, ok := releases.ParseVersion(v.Version)
+			running.Suffix = v.Suffix
+			if ok && releases.NewerThanAll(v.Client, d.result.Releases, running) {
+				stale = append(stale, repo)
+			}
+		}
+	}
+	// Usually zero or one repository; sequential is fine.
+	for _, repo := range stale {
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		res, err := src.Refresh(ctx, repo)
+		cancel()
+		if err == nil {
+			rel[repo] = releaseData{result: &res}
+		}
+	}
+}
+
 // row is one table row with its assessments.
 type row struct {
 	node       string

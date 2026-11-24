@@ -79,6 +79,31 @@ func LatestStable(client ethereum.ClientName, rels []Release) (Version, bool) {
 	return latest, found
 }
 
+// NewestKnown returns the highest version among all releases that are not
+// drafts, including pre-releases and any suffix. A running version above
+// this is not any known release: a proxy's made-up version, a custom build,
+// or a release newer than the data.
+func NewestKnown(client ethereum.ClientName, rels []Release) (Version, bool) {
+	var newest Version
+	found := false
+	for _, r := range rels {
+		if r.Draft {
+			continue
+		}
+		v, ok := ParseVersion(r.Tag)
+		if ok && (!found || Compare(client, v, newest) > 0) {
+			newest, found = v, true
+		}
+	}
+	return newest, found
+}
+
+// NewerThanAll reports whether running is newer than every known release.
+func NewerThanAll(client ethereum.ClientName, rels []Release, running Version) bool {
+	newest, ok := NewestKnown(client, rels)
+	return ok && Compare(client, running, newest) > 0
+}
+
 // FirstMissing returns the earliest published stable release that is newer
 // than running: the moment the node started to be outdated. ok is false if
 // no newer stable release exists.

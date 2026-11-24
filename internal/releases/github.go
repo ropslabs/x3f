@@ -52,6 +52,9 @@ type Result struct {
 	// RefreshErr is set when GitHub could not be asked and older cached
 	// data is returned instead. The caller decides how much that matters.
 	RefreshErr error
+	// Cached is true when the data came from the cache without asking
+	// GitHub in this call (fresh within the TTL).
+	Cached bool
 }
 
 // cacheEntry is the on-disk format.
@@ -67,10 +70,22 @@ type cacheEntry struct {
 // data is returned with RefreshErr set. An error is returned only if there
 // is no data at all.
 func (s *Source) Releases(ctx context.Context, repo Repo) (Result, error) {
+	return s.get(ctx, repo, false)
+}
+
+// Refresh is like Releases but ignores the TTL and always asks GitHub (with
+// a conditional request, so unchanged data costs little). Use it when the
+// cached data looks outdated, e.g. a node runs a version newer than every
+// cached release.
+func (s *Source) Refresh(ctx context.Context, repo Repo) (Result, error) {
+	return s.get(ctx, repo, true)
+}
+
+func (s *Source) get(ctx context.Context, repo Repo, force bool) (Result, error) {
 	now := s.now()
 	cached, haveCache := s.readCache(repo)
-	if haveCache && now.Sub(cached.FetchedAt) < s.TTL {
-		return Result{Releases: cached.Releases, FetchedAt: cached.FetchedAt}, nil
+	if haveCache && !force && now.Sub(cached.FetchedAt) < s.TTL {
+		return Result{Releases: cached.Releases, FetchedAt: cached.FetchedAt, Cached: true}, nil
 	}
 
 	etag := ""
