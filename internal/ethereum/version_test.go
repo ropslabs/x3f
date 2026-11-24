@@ -111,6 +111,42 @@ func TestParseClientVersion(t *testing.T) {
 			want: ClientVersion{Client: Grandine, Version: "2.0.6", Commit: "70a5c7ea"},
 		},
 
+		// Recorded live on 2026-11-24 (testdata/SOURCES.md, "Live recordings").
+		{
+			name: "live: geth built with an older Go",
+			raw:  "Geth/v1.17.9-stable-9dffe6e9/linux-amd64/go1.25.14",
+			want: ClientVersion{Client: Geth, Version: "1.17.9", Suffix: "stable", Commit: "9dffe6e9"},
+		},
+		{
+			// Live Reth reports a 7-character commit, not 8 as derived
+			// from build.rs.
+			name: "live: reth with 7-character commit",
+			raw:  "reth/v2.11.0-b9abbcc/x86_64-unknown-linux-gnu",
+			want: ClientVersion{Client: Reth, Version: "2.11.0", Commit: "b9abbcc"},
+		},
+		{
+			name: "live: nimbus unstable branch build",
+			raw:  "Nimbus/v26.10.2-f64d64-stateofus",
+			want: ClientVersion{Client: Nimbus, Version: "26.10.2", Suffix: "stateofus", Commit: "f64d64"},
+		},
+		{
+			// dRPC's load balancer answers with a made-up Geth version.
+			// The parser can only report what the string says.
+			name: "live: drpc proxy pretends to be geth 10.0.0",
+			raw:  "Geth/v10.0.0/drpc",
+			want: ClientVersion{Client: Geth, Version: "10.0.0"},
+		},
+		{
+			name: "live: mev blocker proxy",
+			raw:  "MEVblocker",
+			want: ClientVersion{Client: Unknown},
+		},
+		{
+			name: "live: cloudflare gateway",
+			raw:  "cloudflare-ethereum",
+			want: ClientVersion{Client: Unknown},
+		},
+
 		// Case-insensitive client detection (synthetic).
 		{
 			name: "synthetic: upper case name",

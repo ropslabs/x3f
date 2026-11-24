@@ -36,6 +36,10 @@ func TestExecutionSync(t *testing.T) {
 			wantBehindOK: true,
 		},
 		{
+			fixture: "live/syncing-false-flashbots-mainnet.json",
+			want:    ExecutionSyncStatus{},
+		},
+		{
 			fixture: "syncing-geth-indexing.json",
 			want: ExecutionSyncStatus{
 				Syncing: true, CurrentBlock: 0x9567a3, HighestBlock: 0x9567a3,
@@ -181,6 +185,15 @@ func TestConsensusSync(t *testing.T) {
 		{
 			fixture: "syncing-synced.json",
 			want:    ConsensusSyncStatus{HeadSlot: 1, SyncDistance: 0, IsSyncing: false, IsOptimistic: ptr(false), ELOffline: ptr(false)},
+		},
+		{
+			// Recorded live; fields in a different order than the spec.
+			fixture: "live/syncing-lighthouse-publicnode-mainnet.json",
+			want:    ConsensusSyncStatus{HeadSlot: 15727077, SyncDistance: 0, IsSyncing: false, IsOptimistic: ptr(true), ELOffline: ptr(false)},
+		},
+		{
+			fixture: "live/syncing-nimbus-unstable-mainnet.json",
+			want:    ConsensusSyncStatus{HeadSlot: 15727077, SyncDistance: 0, IsSyncing: false, IsOptimistic: ptr(true), ELOffline: ptr(true)},
 		},
 		{
 			fixture: "syncing-nimbus-pre-bellatrix.json",

@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -169,7 +170,7 @@ func (c *Client) do(req *http.Request, u *url.URL, out any) error {
 	if resp.StatusCode != http.StatusOK {
 		// The body is deliberately not included: provider error pages may
 		// contain the API key or other details we do not want in logs.
-		return fmt.Errorf("unexpected HTTP status %s", resp.Status)
+		return fmt.Errorf("unexpected HTTP status %s", StatusText(resp.StatusCode))
 	}
 
 	dec := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes))
@@ -200,6 +201,17 @@ func (e *TransportError) Unwrap() error { return e.err }
 func IsTransportError(err error) bool {
 	var te *TransportError
 	return errors.As(err, &te)
+}
+
+// StatusText formats an HTTP status as "500 Internal Server Error", or just
+// "525" for codes without a standard text. The reason phrase sent by the
+// server is ignored: it varies ("525 " from Cloudflare, "525 status code
+// 525" from Go servers) and is not under our control.
+func StatusText(code int) string {
+	if text := http.StatusText(code); text != "" {
+		return fmt.Sprintf("%d %s", code, text)
+	}
+	return strconv.Itoa(code)
 }
 
 // describeTransportError turns errors from http.Client.Do into short,

@@ -97,6 +97,14 @@ func TestExecutionVersion(t *testing.T) {
 		{"nethermind.json", "Nethermind/v2.2.2+be201120/linux-x64/dotnet10.0.14", Nethermind},
 		{"erigon.json", "erigon/3.8.2-8a3f3b2c/linux-amd64/go1.27.4", Erigon},
 		{"besu.json", "besu/v23.1.1-dev-ac23d311/osx-x86_64/graalvm-java-17", Besu},
+		// Recorded live (SOURCES.md). Field order and whitespace differ
+		// between providers; the decoder must not care.
+		{"live/geth-publicnode-mainnet.json", "Geth/v1.17.9-stable-9dffe6e9/linux-amd64/go1.25.14", Geth},
+		{"live/reth-publicnode-sepolia.json", "reth/v2.11.0-b9abbcc/x86_64-unknown-linux-gnu", Reth},
+		{"live/reth-flashbots-mainnet.json", "reth/v2.6.0-73a3a00/x86_64-unknown-linux-gnu", Reth},
+		{"live/proxy-drpc-mainnet.json", "Geth/v10.0.0/drpc", Geth},
+		{"live/proxy-mevblocker-mainnet.json", "MEVblocker", Unknown},
+		{"live/proxy-cloudflare-mainnet.json", "cloudflare-ethereum", Unknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {
@@ -129,6 +137,10 @@ func TestConsensusVersion(t *testing.T) {
 		{"nimbus.json", "Nimbus/v26.10.2-0abc0d-stateofus", Nimbus},
 		{"lodestar.json", "Lodestar/v1.51.0/7923280", Lodestar},
 		{"grandine.json", "Grandine/2.0.6-70a5c7ea/x86_64-linux", Grandine},
+		// Recorded live (SOURCES.md).
+		{"live/lighthouse-publicnode-mainnet.json", "Lighthouse/v8.3.3-57c2abc/x86_64-linux", Lighthouse},
+		{"live/nimbus-unstable-mainnet.json", "Nimbus/v26.10.2-f64d64-stateofus", Nimbus},
+		{"live/lodestar-chainsafe-mainnet.json", "Lodestar/v1.51.0/7923280", Lodestar},
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {
@@ -181,11 +193,25 @@ func TestErrors(t *testing.T) {
 		handler   http.Handler
 		consensus bool // query the beacon API instead of JSON-RPC
 		wantErr   string
+		exact     bool // wantErr must be the whole message
 	}{
 		{
 			name:    "json-rpc method not found",
 			handler: handler(200, string(readFixture(t, filepath.Join("execution", "error-method-not-found.json")))),
 			wantErr: "JSON-RPC error -32601: the method web3_clientVersion does not exist/is not available",
+		},
+		{
+			name:    "live: provider plan error",
+			handler: handler(200, string(readFixture(t, filepath.Join("execution", "live", "error-drpc-sepolia-free-plan.json")))),
+			wantErr: "JSON-RPC error 35: chain is not available on free plan, please upgrade to paid plan",
+		},
+		{
+			// Seen live from a public endpoint behind Cloudflare. The code has
+			// no standard text; the message must not end with a space.
+			name:    "status code without standard text",
+			handler: handler(525, "error code: 525"),
+			wantErr: "web3_clientVersion: unexpected HTTP status 525",
+			exact:   true,
 		},
 		{
 			name:    "json-rpc without result",
@@ -242,6 +268,9 @@ func TestErrors(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("error = %v, want it to contain %q", err, tt.wantErr)
+			}
+			if tt.exact && err.Error() != tt.wantErr {
+				t.Errorf("error = %q, want exactly %q", err, tt.wantErr)
 			}
 		})
 	}

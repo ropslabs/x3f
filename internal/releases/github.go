@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/ropslabs/x3f/internal/ethereum"
 )
 
 const (
@@ -133,7 +135,7 @@ func (s *Source) fetch(ctx context.Context, repo Repo, etag string) (rels []Rele
 		resp.Header.Get("X-RateLimit-Remaining") == "0":
 		return nil, false, "", fmt.Errorf("GitHub releases of %s: rate limit exceeded (set GITHUB_TOKEN for a higher limit)", repo)
 	case resp.StatusCode != http.StatusOK:
-		return nil, false, "", fmt.Errorf("GitHub releases of %s: unexpected HTTP status %s", repo, resp.Status)
+		return nil, false, "", fmt.Errorf("GitHub releases of %s: unexpected HTTP status %s", repo, ethereum.StatusText(resp.StatusCode))
 	}
 
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(&rels); err != nil {

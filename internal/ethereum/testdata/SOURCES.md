@@ -47,6 +47,10 @@ All links are permalinks to the release tag's commit, checked on 2026-11-24.
   [crates/rpc/rpc/src/web3.rs L28-L32](https://github.com/paradigmxyz/reth/blob/b9abbcc1b982755baa9021e6874e2e58936ca65f/crates/rpc/rpc/src/web3.rs#L28-L32).
   Note: `--identity` can replace the whole string.
 - Filled in: commit `b9abbcc1` = tag v2.11.0; target triple of the Linux x86_64 release build.
+- **Deviates from live output:** real Reth nodes report a **7-character** commit
+  (`reth/v2.11.0-b9abbcc/...`, see `execution/live/reth-publicnode-sepolia.json`),
+  not 8 as derived from `build.rs`. Kept as a derived example; the parser
+  accepts both.
 
 ### nethermind.json — derived
 
@@ -221,3 +225,31 @@ Nimbus omits `is_optimistic` before the Bellatrix fork epoch and `el_offline`
 before Capella
 ([beacon_chain/rpc/rest_node_api.nim L261-L290](https://github.com/status-im/nimbus-eth2/blob/0abc0dd0fc0750a8875c49089d074f7d7197b62c/beacon_chain/rpc/rest_node_api.nim#L261-L290)),
 so both are missing here. Filled in: synced values as above.
+
+## Live recordings (`execution/live/`, `consensus/live/`)
+
+Recorded live on 2026-11-24 from public endpoints that need no API key, by
+sending the same requests x3f sends (`web3_clientVersion`, `eth_syncing`,
+`GET /eth/v1/node/version`, `GET /eth/v1/node/syncing`) with curl. Only the
+response body is stored, unchanged (including the provider's field order and
+whitespace); no request or response headers.
+
+| File | Endpoint | Notes |
+|---|---|---|
+| `execution/live/geth-publicnode-mainnet.json` | `https://ethereum-rpc.publicnode.com` | Same format as derived `geth.json`, built with Go 1.25.14 |
+| `execution/live/reth-publicnode-sepolia.json` | `https://ethereum-sepolia-rpc.publicnode.com` | **7-character commit**, derived `reth.json` assumed 8 |
+| `execution/live/reth-flashbots-mainnet.json` | `https://rpc.flashbots.net` | Load-balanced; an earlier request returned `reth/v2.10.0-f5192ac/...`. `result` before `id` |
+| `execution/live/proxy-drpc-mainnet.json` | `https://eth.drpc.org` | **`Geth/v10.0.0/drpc`**: the proxy pretends to be Geth 10.0.0, no real client version |
+| `execution/live/proxy-mevblocker-mainnet.json` | `https://rpc.mevblocker.io` | `MEVblocker`, no version; JSON with spaces after `:` |
+| `execution/live/proxy-cloudflare-mainnet.json` | `https://cloudflare-eth.com` | `cloudflare-ethereum`, no version |
+| `execution/live/error-drpc-sepolia-free-plan.json` | `https://sepolia.drpc.org` | JSON-RPC error code 35 (non-standard) |
+| `execution/live/syncing-false-flashbots-mainnet.json` | `https://rpc.flashbots.net` | `eth_syncing` = `false` |
+| `consensus/live/lighthouse-publicnode-mainnet.json` | `https://ethereum-beacon-api.publicnode.com` | Identical to derived `lighthouse.json` |
+| `consensus/live/nimbus-unstable-mainnet.json` | `http://unstable.mainnet.beacon-api.nimbus.team` | Unstable branch build with the same version number as the release, only the commit differs |
+| `consensus/live/lodestar-chainsafe-mainnet.json` | `https://lodestar-mainnet.chainsafe.io` | Identical to derived `lodestar.json` |
+| `consensus/live/syncing-lighthouse-publicnode-mainnet.json` | `https://ethereum-beacon-api.publicnode.com` | Fields in alphabetical order, `is_optimistic: true` |
+| `consensus/live/syncing-nimbus-unstable-mainnet.json` | `http://unstable.mainnet.beacon-api.nimbus.team` | `is_optimistic: true`, `el_offline: true` |
+
+Also observed, not stored as a file: `https://eth.llamarpc.com` answered with
+HTTP 525 and the plain-text body `error code: 525` (Cloudflare origin TLS
+error); covered by a synthetic test case.
