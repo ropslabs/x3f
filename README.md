@@ -4,7 +4,7 @@
 
 x3f tells you what is running where, in which version, who owns it, and what needs attention next: known vulnerabilities, end-of-life dates and, for blockchain nodes, upcoming hard forks.
 
-> **Status:** early stage (v0.x). The Ethereum node check below works today, including known security advisories of the clients and Telegram notifications on status changes; inventory is planned. Flags and output may still change between 0.x releases.
+> **Status:** early stage (v0.x). The Ethereum node check below works today, including known security advisories of the clients, Telegram notifications on status changes and Prometheus metrics; inventory is planned. Flags and output may still change between 0.x releases.
 >
 > *An n-day is a known vulnerability that already has a fix. Many attacks don't need a zero-day, just a system where the existing patch was never applied. x3f finds those systems.*
 
@@ -12,7 +12,7 @@ x3f tells you what is running where, in which version, who owns it, and what nee
 
 ## Quick start
 
-x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, whether a published security advisory affects them, and whether they are ready for the next hard fork. It can send a Telegram message when a node's status changes. It is a single binary that only reads from your nodes.
+x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, whether a published security advisory affects them, and whether they are ready for the next hard fork. It can send a Telegram message when a node's status changes and write Prometheus metrics. It is a single binary that only reads from your nodes.
 
 ### Install
 
@@ -114,7 +114,7 @@ Built with solo stakers and small validator teams in mind, people who run nodes 
 
 ## Usage
 
-> What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release, security advisories of the client repositories, fork readiness (asked from the node itself, with the announced client releases as fallback) and Telegram notifications on status changes.
+> What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release, security advisories of the client repositories, fork readiness (asked from the node itself, with the announced client releases as fallback), Telegram notifications on status changes and Prometheus metrics for the node_exporter textfile collector.
 
 Example output:
 
@@ -164,6 +164,7 @@ If GitHub is unreachable, cached release and advisory data younger than 7 days i
 | `-state-file` | `~/.local/state/x3f/state.json` | where x3f remembers what it last notified about (`$XDG_STATE_HOME` is respected) |
 | `-no-notify` | | send no notifications and leave the state file alone, for manual runs |
 | `-notify-test` | | send a test message to the configured Telegram chat and exit |
+| `-metrics-file` | | write Prometheus metrics to this file (see [below](#prometheus-metrics)) |
 | `-version` | | print the version and exit |
 
 ### Fork readiness
@@ -240,9 +241,70 @@ x3f does not yet dampen flapping: a node that is unreachable for a single run ca
 
 The Telegram API address (`https://api.telegram.org`) is built in and cannot be configured, because the bot token is part of every request URL. The tests replace it internally with a mock server; that is a test setting only, not an option.
 
+### Prometheus metrics
+
+With `-metrics-file`, x3f writes its results as Prometheus metrics for the [textfile collector](https://github.com/prometheus/node_exporter#textfile-collector) of the node_exporter. Point it into the directory node_exporter reads (`--collector.textfile.directory`); the directory must exist and the file name must end in `.prom`:
+
+```
+0 * * * * /usr/local/bin/x3f -config /etc/x3f/x3f.yaml -metrics-file /var/lib/node_exporter/textfile/x3f.prom > /var/lib/x3f/last.txt 2>&1
+```
+
+The file is written atomically (a temporary file in the same directory, then renamed), so node_exporter never reads half a file. It is readable by everyone (`0644`), because node_exporter usually runs as another user.
+
+| Metric | Labels | Value |
+|---|---|---|
+| `x3f_node_status` | `node` | 0 OK, 1 WARN, 2 CRIT |
+| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories` |
+| `x3f_client_info` | `node`, `component`, `client`, `version`, `build` | 1; `build` is `release`, `prerelease`, `dev` or `unknown` |
+| `x3f_client_latest_info` | `client`, `version` | 1, the highest stable release known from GitHub |
+| `x3f_advisories` | `node`, `component`, `severity` | number of published advisories that affect the client and are not ignored; `severity` is `critical`, `high`, `medium`, `low` or `none` |
+| `x3f_next_fork_timestamp_seconds` | `network`, `fork` | activation time of the next scheduled fork; missing if none is scheduled |
+| `x3f_build_info` | `version`, `commit`, `goversion` | 1 |
+| `x3f_last_run_timestamp_seconds` | | when the last run ended |
+| `x3f_last_run_success` | | 1 if x3f could do its own work: GitHub data available (fresh or cached for less than 7 days), notification delivered, state file read and written; 0 otherwise. Problems of the nodes do not count here. |
+
+Labels only carry values from small, known sets, never findings, titles or error messages; versions are plain numbers such as `1.17.10`. The findings themselves stay in x3f's output and in the Telegram message. A check that could not run, such as the sync status of an unreachable client, reports 3 (unknown), as in the Nagios plugin convention; `x3f_node_status` stays 0, 1 or 2.
+
+If x3f cannot run at all (invalid flags or config), it leaves the file alone: the node metrics stay, and `x3f_last_run_timestamp_seconds` gets old. A file that cannot be written is a yellow finding (exit code at least `1`).
+
+Example alerting rules for Prometheus (they work as data-source-managed rules in Grafana as well):
+
+```yaml
+groups:
+  - name: x3f
+    rules:
+      - alert: X3fNodeCritical
+        expr: x3f_node_status == 2
+        for: 30m   # Prometheus waits before firing, so a single bad run does not alert
+        annotations:
+          summary: "x3f: {{ $labels.node }} is CRIT"
+          description: "Run x3f on {{ $labels.instance }} to see the findings."
+      - alert: X3fNodeWarning
+        expr: x3f_node_status == 1
+        for: 6h
+        annotations:
+          summary: "x3f: {{ $labels.node }} is WARN"
+      - alert: X3fNotRunning
+        # about twice the cron interval (hourly in the example above)
+        expr: time() - x3f_last_run_timestamp_seconds > 7200 or absent(x3f_last_run_timestamp_seconds)
+        annotations:
+          summary: "x3f has not finished a run for 2 hours"
+      - alert: X3fRunDegraded
+        expr: x3f_last_run_success == 0
+        for: 1h
+        annotations:
+          summary: "x3f runs, but GitHub data, the notification or the state file failed"
+      - alert: X3fTextfileError
+        expr: node_textfile_scrape_error == 1
+        annotations:
+          summary: "node_exporter cannot read a textfile (x3f.prom?)"
+```
+
 ### Environment
 
 `GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `X3F_TELEGRAM_BOT_TOKEN` is the Telegram bot token, required if the config has a `telegram` section (see [above](#telegram-notifications)); it is never stored or printed. `NO_COLOR` disables colors.
+
+x3f uses the standard proxy variables `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` for GitHub, Telegram and the nodes; requests to `localhost` and loopback addresses never go through a proxy. With `https://` the proxy only sees host and port. With an `http://` node URL and `HTTP_PROXY` set, however, the proxy sees the full URL, including an API key in it: add the node hosts to `NO_PROXY` or use `https://`.
 
 ### Exit codes
 
@@ -251,7 +313,7 @@ The exit codes follow the [Nagios plugin convention](https://nagios-plugins.org/
 | Code | Meaning |
 |---|---|
 | `0` | OK: everything is green |
-| `1` | WARNING: at least one yellow finding (also: a notification could not be sent) |
+| `1` | WARNING: at least one yellow finding (also: a notification or the metrics file could not be written) |
 | `2` | CRITICAL: at least one red finding |
 | `3` | UNKNOWN: x3f could not run (invalid flags or config) |
 

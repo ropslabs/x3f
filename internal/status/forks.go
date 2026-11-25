@@ -43,6 +43,9 @@ type ForkInput struct {
 type ForkResult struct {
 	Assessment
 	Cell string
+	// NotRun is set if the check could not run: no fork schedule, no
+	// detected chain, or a network without fork data.
+	NotRun bool
 }
 
 // AssessForks checks fork readiness per layer. If the node reports its fork
@@ -70,7 +73,7 @@ type ForkResult struct {
 //	        ready release announced yet ("waiting for client release");
 //	        client not recognized while a fork is scheduled
 func AssessForks(in ForkInput) ForkResult {
-	r := ForkResult{Cell: "-"}
+	r := ForkResult{Cell: "-", NotRun: true}
 	if in.Schedule == nil || !in.HaveChain {
 		return r
 	}
@@ -78,6 +81,7 @@ func AssessForks(in ForkInput) ForkResult {
 	if !ok {
 		return r // unknown network: already noted by AssessNetwork
 	}
+	r.NotRun = false
 	c := &forkCheck{in: in, n: n, r: &r}
 	c.next, c.hasNext = n.Next(in.Now)
 

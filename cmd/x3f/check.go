@@ -234,6 +234,9 @@ type row struct {
 	level    status.Level
 	cells    [7]string // network, execution, EL sync, consensus, CL sync, fork, advisories
 	findings []layerFindings
+	// advisories holds the advisory counts per severity of each assessed
+	// component ("execution", "consensus"), for the metrics.
+	advisories map[string]map[string]int
 }
 
 // layerFindings are the findings of one part of a node, e.g. "execution
@@ -241,6 +244,10 @@ type row struct {
 type layerFindings struct {
 	name string
 	status.Assessment
+	// notRun is set if the check could not run, e.g. the sync status of
+	// an unreachable client. Its level is then OK with no findings; the
+	// metrics report it as unknown.
+	notRun bool
 }
 
 // assessParams are the settings for assess.
@@ -290,20 +297,24 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 		ignore := config.MergeIgnores(p.ignore, r.Ignore)
 		ea := status.AssessAdvisories(advisoryInput(r.Execution.Version, r.Execution.VersionErr, ignore))
 		ca := status.AssessAdvisories(advisoryInput(r.Consensus.Version, r.Consensus.VersionErr, ignore))
+		ignoreCheck, ignoreRan := checkIgnoreList(r.Ignore, []nodeResult{r}, adv, false)
 		a := []layerFindings{
 			{"network", status.AssessNetwork(status.NetworkInput{
 				Expected:    r.Network,
 				ExecutionID: r.Execution.ChainID, ExecutionErr: r.Execution.ChainIDErr, ExecutionSkipped: r.Execution.Unreachable,
 				ConsensusID: r.Consensus.ChainID, ConsensusErr: r.Consensus.ChainIDErr, ConsensusSkipped: r.Consensus.Unreachable,
-			})},
-			{"execution", status.AssessVersion(ev)},
-			{"execution sync", status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync)},
-			{"consensus", status.AssessVersion(cv)},
-			{"consensus sync", status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync)},
-			{"fork", fork.Assessment},
-			{"execution advisories", ea.Assessment},
-			{"consensus advisories", ca.Assessment},
-			{"ignore_advisories", checkIgnoreList(r.Ignore, []nodeResult{r}, adv, false)},
+			}), r.Execution.Unreachable && r.Consensus.Unreachable},
+			{"execution", status.AssessVersion(ev), false},
+			{"execution sync", status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync), r.Execution.Unreachable},
+			{"consensus", status.AssessVersion(cv), false},
+			{"consensus sync", status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync), r.Consensus.Unreachable},
+			{"fork", fork.Assessment, fork.NotRun},
+			// An empty cell means the client was not assessed.
+			{"execution advisories", ea.Assessment, ea.Cell == ""},
+			{"consensus advisories", ca.Assessment, ca.Cell == ""},
+			// Without entries there is nothing to check, which is not
+			// "could not run".
+			{"ignore_advisories", ignoreCheck, len(r.Ignore) > 0 && !ignoreRan},
 		}
 		rw := row{
 			node: r.Name,
@@ -316,7 +327,13 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 				fork.Cell,
 				formatAdvisories(ea.Cell, ca.Cell),
 			},
-			findings: a,
+			findings:   a,
+			advisories: map[string]map[string]int{},
+		}
+		for comp, counts := range map[string]map[string]int{"execution": ea.Counts, "consensus": ca.Counts} {
+			if counts != nil {
+				rw.advisories[comp] = counts
+			}
 		}
 		for _, x := range a {
 			rw.level = max(rw.level, x.Level)
@@ -377,11 +394,12 @@ func notifyChanges(ctx context.Context, tg *notify.Telegram, cfg *config.Telegra
 
 // checkIgnoreList reports entries of an ignore list that are not
 // advisories of any client of nodes, so typos show up; global marks the
-// global list. It says nothing if a client could not be identified or its
-// advisories are unknown: the ID might belong to that client.
-func checkIgnoreList(entries []config.AdvisoryIgnore, nodes []nodeResult, adv map[releases.Repo]advisoryData, global bool) status.Assessment {
+// global list. It does not run (ran is false) if a client could not be
+// identified or its advisories are unknown: the ID might belong to that
+// client.
+func checkIgnoreList(entries []config.AdvisoryIgnore, nodes []nodeResult, adv map[releases.Repo]advisoryData, global bool) (a status.Assessment, ran bool) {
 	if len(entries) == 0 {
-		return status.Assessment{}
+		return status.Assessment{}, true
 	}
 	var lists [][]releases.Advisory
 	var seen []releases.Repo
@@ -390,7 +408,7 @@ func checkIgnoreList(entries []config.AdvisoryIgnore, nodes []nodeResult, adv ma
 		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
 			repo, ok := releases.RepoFor(v.Client)
 			if !ok || adv[repo].result == nil {
-				return status.Assessment{}
+				return status.Assessment{}, false
 			}
 			if !slices.Contains(seen, repo) {
 				seen = append(seen, repo)
@@ -400,7 +418,7 @@ func checkIgnoreList(entries []config.AdvisoryIgnore, nodes []nodeResult, adv ma
 		}
 	}
 	slices.Sort(names)
-	return status.AssessIgnoreList(entries, lists, names, global)
+	return status.AssessIgnoreList(entries, lists, names, global), true
 }
 
 // detectedChain returns the node's chain ID for the fork check, preferring

@@ -29,16 +29,21 @@ func buildVersion() string {
 	return "dev"
 }
 
-// versionText is the output of -version, e.g.
-// "x3f v0.1.0 (commit 4d9651e, go1.27.4, linux/amd64)".
-func versionText() string {
-	commit := "unknown"
+// buildCommit returns the short git commit the binary was built from, or
+// "unknown".
+func buildCommit() string {
 	if info, ok := debug.ReadBuildInfo(); ok {
 		for _, s := range info.Settings {
 			if s.Key == "vcs.revision" && len(s.Value) >= 7 {
-				commit = s.Value[:7]
+				return s.Value[:7]
 			}
 		}
 	}
-	return fmt.Sprintf("x3f %s (commit %s, %s, %s/%s)", buildVersion(), commit, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	return "unknown"
+}
+
+// versionText is the output of -version, e.g.
+// "x3f v0.1.0 (commit 4d9651e, go1.27.4, linux/amd64)".
+func versionText() string {
+	return fmt.Sprintf("x3f %s (commit %s, %s, %s/%s)", buildVersion(), buildCommit(), runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }

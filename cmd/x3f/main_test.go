@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1227,7 +1228,11 @@ func TestRunTelegram(t *testing.T) {
 	// Back to good, but Telegram rejects the token: the nodes are fine,
 	// the failed notification turns the run yellow.
 	tg.answer(http.StatusUnauthorized, "unauthorized.json")
-	code, out = runAt(good, 3*h)
+	metricsFile := filepath.Join(t.TempDir(), "x3f.prom")
+	code, out = runAt(good, 3*h, "-metrics-file", metricsFile)
+	if got := readFile(t, metricsFile); !strings.Contains(got, "\nx3f_last_run_success 0\n") || !strings.Contains(got, "\nx3f_node_status{node=\"a\"} 0\n") {
+		t.Errorf("metrics after a failed notification:\n%s", got)
+	}
 	if code != exitWarn || !strings.Contains(out, "WARN  notification failed, will retry on the next run: Telegram: HTTP 401: Unauthorized") ||
 		!strings.Contains(out, "Status: WARN (1 OK, 0 WARN, 0 CRIT)") || len(tg.sent()) != 1 {
 		t.Errorf("Telegram failure: exit %d\n%s", code, out)
@@ -1382,4 +1387,191 @@ func proxyChild() {
 	run(context.Background(), []string{"-config", os.Getenv("X3F_PROXY_CONFIG"), "-timeout", "5s",
 		"-cache-dir", filepath.Join(dir, "cache"), "-state-file", filepath.Join(dir, "state.json")},
 		os.Stdout, os.Stdout, e)
+}
+
+// TestRunMetrics checks the metrics file end to end: a healthy node, the
+// outdated Besu node (with a quote in its name, to check escaping) and an
+// unreachable node.
+func TestRunMetrics(t *testing.T) {
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	nodes := `
+nodes:
+  - {name: good, execution_url: ` + m.gethSynced.URL + `, beacon_url: ` + m.lighthouseSynced.URL + `}
+  - {name: "out\"dated", execution_url: ` + m.besuOutdated.URL + `, beacon_url: ` + m.nimbusSynced.URL + `}
+  - {name: down, execution_url: http://` + m.deadAddr + `, beacon_url: ` + m.broken.URL + `}
+`
+	path := writeConfig(t, nodes)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "x3f.prom")
+	runWith := func(at time.Time, args ...string) (int, string) {
+		var out bytes.Buffer
+		args = append([]string{"-config", path, "-timeout", "2s", "-metrics-file", file}, args...)
+		code := run(context.Background(), args, &out, &out, testEnv(gh, at))
+		return code, out.String()
+	}
+
+	cache := t.TempDir()
+	if code, out := runWith(now, "-cache-dir", cache); code != exitCrit {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	want := strings.ReplaceAll(`# HELP x3f_node_status Status of a node: 0 OK, 1 WARN, 2 CRIT.
+# TYPE x3f_node_status gauge
+x3f_node_status{node="good"} 0
+x3f_node_status{node="out\"dated"} 2
+x3f_node_status{node="down"} 2
+# HELP x3f_check_status Status of one check of a node: 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run).
+# TYPE x3f_check_status gauge
+x3f_check_status{node="good",check="network"} 0
+x3f_check_status{node="good",check="execution"} 0
+x3f_check_status{node="good",check="execution_sync"} 0
+x3f_check_status{node="good",check="consensus"} 0
+x3f_check_status{node="good",check="consensus_sync"} 0
+x3f_check_status{node="good",check="fork"} 0
+x3f_check_status{node="good",check="execution_advisories"} 0
+x3f_check_status{node="good",check="consensus_advisories"} 0
+x3f_check_status{node="good",check="ignore_advisories"} 0
+x3f_check_status{node="out\"dated",check="network"} 0
+x3f_check_status{node="out\"dated",check="execution"} 2
+x3f_check_status{node="out\"dated",check="execution_sync"} 0
+x3f_check_status{node="out\"dated",check="consensus"} 0
+x3f_check_status{node="out\"dated",check="consensus_sync"} 0
+x3f_check_status{node="out\"dated",check="fork"} 2
+x3f_check_status{node="out\"dated",check="execution_advisories"} 2
+x3f_check_status{node="out\"dated",check="consensus_advisories"} 0
+x3f_check_status{node="out\"dated",check="ignore_advisories"} 0
+x3f_check_status{node="down",check="network"} 1
+x3f_check_status{node="down",check="execution"} 2
+x3f_check_status{node="down",check="execution_sync"} 3
+x3f_check_status{node="down",check="consensus"} 1
+x3f_check_status{node="down",check="consensus_sync"} 1
+x3f_check_status{node="down",check="fork"} 3
+x3f_check_status{node="down",check="execution_advisories"} 3
+x3f_check_status{node="down",check="consensus_advisories"} 3
+x3f_check_status{node="down",check="ignore_advisories"} 0
+# HELP x3f_client_info Client and version a node runs; build is release, prerelease, dev or unknown.
+# TYPE x3f_client_info gauge
+x3f_client_info{node="good",component="execution",client="geth",version="1.17.10",build="release"} 1
+x3f_client_info{node="good",component="consensus",client="lighthouse",version="8.3.3",build="release"} 1
+x3f_client_info{node="out\"dated",component="execution",client="besu",version="23.1.1",build="dev"} 1
+x3f_client_info{node="out\"dated",component="consensus",client="nimbus",version="26.10.2",build="release"} 1
+# HELP x3f_client_latest_info Highest stable release of a client known from GitHub.
+# TYPE x3f_client_latest_info gauge
+x3f_client_latest_info{client="geth",version="1.17.10"} 1
+x3f_client_latest_info{client="lighthouse",version="8.3.3"} 1
+x3f_client_latest_info{client="besu",version="26.11.2"} 1
+x3f_client_latest_info{client="nimbus",version="26.10.2"} 1
+# HELP x3f_advisories Published security advisories that affect a client and are not ignored, by severity.
+# TYPE x3f_advisories gauge
+x3f_advisories{node="good",component="execution",severity="critical"} 0
+x3f_advisories{node="good",component="execution",severity="high"} 0
+x3f_advisories{node="good",component="execution",severity="medium"} 0
+x3f_advisories{node="good",component="execution",severity="low"} 0
+x3f_advisories{node="good",component="execution",severity="none"} 0
+x3f_advisories{node="good",component="consensus",severity="critical"} 0
+x3f_advisories{node="good",component="consensus",severity="high"} 0
+x3f_advisories{node="good",component="consensus",severity="medium"} 0
+x3f_advisories{node="good",component="consensus",severity="low"} 0
+x3f_advisories{node="good",component="consensus",severity="none"} 0
+x3f_advisories{node="out\"dated",component="execution",severity="critical"} 0
+x3f_advisories{node="out\"dated",component="execution",severity="high"} 13
+x3f_advisories{node="out\"dated",component="execution",severity="medium"} 19
+x3f_advisories{node="out\"dated",component="execution",severity="low"} 6
+x3f_advisories{node="out\"dated",component="execution",severity="none"} 0
+x3f_advisories{node="out\"dated",component="consensus",severity="critical"} 0
+x3f_advisories{node="out\"dated",component="consensus",severity="high"} 0
+x3f_advisories{node="out\"dated",component="consensus",severity="medium"} 0
+x3f_advisories{node="out\"dated",component="consensus",severity="low"} 0
+x3f_advisories{node="out\"dated",component="consensus",severity="none"} 0
+# HELP x3f_build_info Version of x3f.
+# TYPE x3f_build_info gauge
+x3f_build_info{version="dev",commit="unknown",goversion="GOVERSION"} 1
+# HELP x3f_last_run_timestamp_seconds When the last run of x3f ended (Unix time).
+# TYPE x3f_last_run_timestamp_seconds gauge
+x3f_last_run_timestamp_seconds 1795521600
+# HELP x3f_last_run_success 1 if x3f could do its own work in the last run (GitHub data, notification, state file), 0 otherwise.
+# TYPE x3f_last_run_success gauge
+x3f_last_run_success 1
+`, "GOVERSION", runtime.Version())
+	if got := readFile(t, file); got != want {
+		t.Errorf("metrics file:\n%s\nwant:\n%s", got, want)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("leftover files: %v", entries)
+	}
+
+	// A scheduled fork appears as x3f_next_fork_timestamp_seconds.
+	forksFile := writeForks(t, "2026-11-20", 30*24*time.Hour, "")
+	runWith(now, "-cache-dir", cache, "-forks", forksFile)
+	if got := readFile(t, file); !regexp.MustCompile(`\nx3f_next_fork_timestamp_seconds\{network="mainnet",fork="Testfork"\} 17981\d{5}\n`).MatchString(got) {
+		t.Errorf("no next fork metric:\n%s", got)
+	}
+
+	// GitHub down: cached data younger than 7 days still counts, older or
+	// missing data does not.
+	gh.down.Store(true)
+	runWith(now.Add(3*24*time.Hour), "-cache-dir", cache)
+	if got := readFile(t, file); !strings.Contains(got, "\nx3f_last_run_success 1\n") {
+		t.Errorf("GitHub down, cache 3 days old:\n%s", got)
+	}
+	runWith(now.Add(8*24*time.Hour), "-cache-dir", cache)
+	if got := readFile(t, file); !strings.Contains(got, "\nx3f_last_run_success 0\n") {
+		t.Errorf("GitHub down, cache 8 days old:\n%s", got)
+	}
+	runWith(now.Add(time.Hour), "-cache-dir", t.TempDir())
+	gh.down.Store(false)
+	if got := readFile(t, file); !strings.Contains(got, "\nx3f_last_run_success 0\n") || !strings.Contains(got, "\nx3f_last_run_timestamp_seconds 1795525200\n") {
+		t.Errorf("GitHub down:\n%s", got)
+	}
+
+	// A hard error (invalid config) leaves the file alone, so that the
+	// node metrics stay and the timestamp gets old.
+	before := readFile(t, file)
+	path = writeConfig(t, "nodes: []\n")
+	if code, _ := runWith(now.Add(2 * time.Hour)); code != exitUnknown || readFile(t, file) != before {
+		t.Errorf("invalid config: exit %d, file changed", code)
+	}
+
+	// A file that cannot be written is a warning of its own.
+	path = writeConfig(t, nodes)
+	file = filepath.Join(dir, "missing", "x3f.prom")
+	code, out := runWith(now, "-cache-dir", cache)
+	if code != exitCrit || !strings.Contains(out, "WARN  write metrics: open ") {
+		t.Errorf("unwritable file: exit %d\n%s", code, out)
+	}
+}
+
+// TestRunMetricsUnknownChecks: for a node whose clients are both
+// unreachable, every check that could not run reports 3 (unknown).
+func TestRunMetricsUnknownChecks(t *testing.T) {
+	gh := newFakeGitHub(t)
+	path := writeConfig(t, `
+nodes:
+  - name: dead
+    execution_url: http://`+deadAddr+`
+    beacon_url: http://`+deadAddr+`
+    ignore_advisories:
+      - {id: GHSA-v5gq-r843-8f73, reason: test}
+`)
+	file := filepath.Join(t.TempDir(), "x3f.prom")
+	var out bytes.Buffer
+	run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir(), "-metrics-file", file}, &out, &out, testEnv(gh, now))
+
+	got := readFile(t, file)
+	want := `x3f_node_status{node="dead"} 2
+# HELP x3f_check_status Status of one check of a node: 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run).
+# TYPE x3f_check_status gauge
+x3f_check_status{node="dead",check="network"} 3
+x3f_check_status{node="dead",check="execution"} 2
+x3f_check_status{node="dead",check="execution_sync"} 3
+x3f_check_status{node="dead",check="consensus"} 2
+x3f_check_status{node="dead",check="consensus_sync"} 3
+x3f_check_status{node="dead",check="fork"} 3
+x3f_check_status{node="dead",check="execution_advisories"} 3
+x3f_check_status{node="dead",check="consensus_advisories"} 3
+x3f_check_status{node="dead",check="ignore_advisories"} 3
+`
+	if !strings.Contains(got, want) {
+		t.Errorf("metrics file:\n%s\nwant it to contain:\n%s", got, want)
+	}
 }

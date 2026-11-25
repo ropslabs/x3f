@@ -56,6 +56,11 @@ type AdvisoryResult struct {
 	// Cell is e.g. "5 (high)", "none known" or "?"; empty if the client
 	// was not assessed (unreachable, not recognized, no repository).
 	Cell string
+	// Counts is the number of advisories that affect the client and are
+	// not ignored, per severity: "critical", "high", "medium", "low" and
+	// "none" (no severity given), all present. nil if the advisories are
+	// unknown or the client was not assessed.
+	Counts map[string]int
 }
 
 // affectedBy is one advisory that affects the running version.
@@ -162,6 +167,17 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 	}
 
 	all := append(slices.Clone(fixed), unfixed...)
+	r.Counts = map[string]int{"none": 0}
+	for _, s := range severities {
+		r.Counts[s] = 0
+	}
+	for _, a := range all {
+		if rank := severityRank(a.adv.Severity); rank > 0 {
+			r.Counts[severityName(rank)]++
+		} else {
+			r.Counts["none"]++
+		}
+	}
 	switch {
 	case len(all) == 0:
 		r.Cell = "none known"

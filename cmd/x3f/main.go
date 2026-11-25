@@ -17,6 +17,7 @@ import (
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/forks"
+	"github.com/ropslabs/x3f/internal/metrics"
 	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
@@ -43,7 +44,8 @@ client does not report it, its version is compared with the announced
 releases.
 
 With a telegram section in the config, x3f sends a Telegram message when a
-node's status changes (see -state-file).
+node's status changes (see -state-file). With -metrics-file, it writes
+Prometheus metrics for the node_exporter textfile collector.
 
 Flags:
 `
@@ -130,6 +132,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	stateFile := fs.String("state-file", defaultStateFile(), "file where x3f remembers what it last notified about")
 	noNotify := fs.Bool("no-notify", false, "send no notifications and leave the state file alone (for manual runs)")
 	notifyTest := fs.Bool("notify-test", false, "send a test message to the configured Telegram chat and exit")
+	metricsFile := fs.String("metrics-file", "", "write Prometheus metrics to this file, e.g. /var/lib/node_exporter/textfile/x3f.prom (the name must end in .prom)")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 
 	if err := fs.Parse(args); err != nil {
@@ -221,15 +224,27 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		global = append(global, f)
 	}
 	// Global entries are checked against the clients of all nodes.
-	for _, f := range checkIgnoreList(cfg.IgnoreAdvisories, results, adv, true).Findings {
+	globalIgnore, _ := checkIgnoreList(cfg.IgnoreAdvisories, results, adv, true)
+	for _, f := range globalIgnore.Findings {
 		f.Message = "ignore_advisories: " + f.Message
 		global = append(global, f)
 	}
+	success := githubComplete(rel, adv, now)
 	if tg != nil {
-		global = append(global, notifyChanges(ctx, tg, cfg.Telegram, rows, *stateFile, now, *timeout)...)
+		nf := notifyChanges(ctx, tg, cfg.Telegram, rows, *stateFile, now, *timeout)
+		for _, f := range nf {
+			success = success && f.Level == status.OK
+		}
+		global = append(global, nf...)
 	}
-	// A failed notification is a problem of its own: the exit code shows
-	// it even if every node is fine.
+	if *metricsFile != "" {
+		data := metrics.Render(buildMetrics(results, rows, rel, schedule, success, e.now()))
+		if err := metrics.WriteFile(*metricsFile, data); err != nil {
+			global = append(global, status.Finding{Level: status.Warn, Message: err.Error()})
+		}
+	}
+	// A failed notification or metrics file is a problem of its own: the
+	// exit code shows it even if every node is fine.
 	for _, f := range global {
 		overall = max(overall, f.Level)
 	}

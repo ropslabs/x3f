@@ -3,6 +3,7 @@ package status
 import (
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -109,6 +110,13 @@ func TestAssessAdvisoriesRecorded(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			advs, rels := data(t, tt.repo)
 			r := AssessAdvisories(AdvisoryInput{Version: ethereum.ParseClientVersion(tt.raw), Advisories: advs, Releases: rels, Now: now})
+			total := 0
+			for _, n := range r.Counts {
+				total += n
+			}
+			if len(r.Counts) != 5 || (total == 0) != (tt.cell == "none known") {
+				t.Errorf("counts %v for cell %q", r.Counts, tt.cell)
+			}
 			if r.Level != tt.level || r.Cell != tt.cell {
 				t.Errorf("level %v, cell %q; want %v, %q", r.Level, r.Cell, tt.level, tt.cell)
 			}
@@ -433,5 +441,25 @@ func TestOrList(t *testing.T) {
 		if got := orList(tt.in); got != tt.want {
 			t.Errorf("orList(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestAssessAdvisoriesCounts(t *testing.T) {
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	advs := &releases.AdvisoryResult{Advisories: recorded[releases.Advisory](t, "advisories", "ethereum_go-ethereum.json"), FetchedAt: now}
+	v := ethereum.ParseClientVersion("Geth/v1.16.7-stable-aaaaaaaa/linux-amd64/go1.25.3")
+
+	// Five advisories affect 1.16.7 (see TestAssessAdvisoriesRecorded);
+	// one of them ignored.
+	r := AssessAdvisories(AdvisoryInput{Version: v, Advisories: advs, Now: now,
+		Ignore: []config.AdvisoryIgnore{{ID: "GHSA-2gjw-fg97-vg3r", Reason: "test"}}})
+	want := map[string]int{"critical": 0, "high": 1, "medium": 3, "low": 0, "none": 0}
+	if !maps.Equal(r.Counts, want) {
+		t.Errorf("counts = %v, want %v", r.Counts, want)
+	}
+
+	r = AssessAdvisories(AdvisoryInput{Version: v, AdvisoriesErr: errors.New("down"), Now: now})
+	if r.Counts != nil {
+		t.Errorf("counts without data = %v, want nil", r.Counts)
 	}
 }

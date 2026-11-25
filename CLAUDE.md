@@ -26,6 +26,7 @@ Goal: for each configured node, report whether its clients are up to date, wheth
    - `min_level` warn (default) or crit; with crit, leaving CRIT is still reported (all clear);
    - a node that stays red gets at most one reminder per `remind_every` (default 24h, 0 disables);
    - a failed notification is a global yellow finding (exit code at least 1) and is retried on the next run.
+5. **Metrics** (`-metrics-file`): Prometheus text format for the node_exporter textfile collector, written atomically (temp file without `.prom` in the same directory, then rename). Status 0/1/2 per node and per check (3 = unknown for a check that could not run), versions as info metrics with value 1, `x3f_last_run_timestamp_seconds` and `x3f_last_run_success` (GitHub data, notification, state file). No free text in labels. On a hard error (exit 3) the file is left alone.
 
 **Out of scope for v1:** MEV-Boost (no version API), other chains, web UI, database, applying updates, the company/server module.
 
@@ -49,6 +50,7 @@ internal/releases/    GitHub releases (with disk cache) and security advisories,
 internal/status/      green / yellow / red rules and findings
 internal/forks/       load and evaluate forks.yaml
 internal/notify/      decide what to notify (state file) and send it to Telegram
+internal/metrics/     Prometheus text format, atomic write for the node_exporter textfile collector
 internal/*/testdata/  per-package test fixtures (e.g. recorded API responses), with their source noted
 scripts/              release build (build-release.sh)
 .github/workflows/    CI (gofmt, vet, test -race, build) and release
@@ -97,7 +99,7 @@ scripts/              release build (build-release.sh)
 6. Telegram notifications on status changes
 7. Prometheus metrics (e.g. a file for the node_exporter textfile collector)
 
-Steps 1–6 are done (1–4 released as v0.1.0). Later, not scheduled yet: Nagios output format (with the company module; the first audience, solo stakers, uses Prometheus, Grafana and Telegram) and the forkId check.
+Steps 1–7 are done (1–4 released as v0.1.0); version 1 is complete. Later, not scheduled yet: Nagios output format (with the company module; the first audience, solo stakers, uses Prometheus, Grafana and Telegram) and the forkId check.
 
 While working on steps 5–7: where it costs no extra effort, do not hard-wire logic to the execution/consensus pair, so the component model below stays a small refactor.
 
