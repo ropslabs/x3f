@@ -105,6 +105,17 @@ func NewerThanAll(client ethereum.ClientName, rels []Release, running Version) b
 	return ok && Compare(client, running, newest) > 0
 }
 
+// ReleasedAtLeast reports whether a stable release of v or newer exists. An
+// advisory may name a patched version before that release is out.
+func ReleasedAtLeast(client ethereum.ClientName, rels []Release, v Version) bool {
+	for _, r := range rels {
+		if s, ok := stable(client, r); ok && Compare(client, s, v) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // FirstMissing returns the earliest published stable release that is newer
 // than running: the moment the node started to be outdated. ok is false if
 // no newer stable release exists.
