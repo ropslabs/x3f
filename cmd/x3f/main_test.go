@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -114,9 +116,23 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 	return gh
 }
 
+// deadAddr is a node address whose connections are always refused (see
+// testEnv). Closing a test server and reusing its port would be flaky: the
+// OS may give the port to another test server in the meantime.
+const deadAddr = "dead-node.invalid:8545"
+
 func testEnv(gh *fakeGitHub, at time.Time) env {
+	var d net.Dialer
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if addr == deadAddr {
+				return nil, &net.OpError{Op: "dial", Net: network, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+			}
+			return d.DialContext(ctx, network, addr)
+		},
+	}
 	return env{
-		client:        ethereum.NewClient(nil),
+		client:        ethereum.NewClient(&http.Client{Transport: transport}),
 		githubBaseURL: gh.URL,
 		now:           func() time.Time { return at },
 	}
@@ -154,10 +170,6 @@ type mocks struct {
 
 func newMocks(t *testing.T) mocks {
 	t.Helper()
-	dead := httptest.NewServer(http.NotFoundHandler())
-	addr := dead.Listener.Addr().String()
-	dead.Close() // nothing listens there any more: connections are refused
-
 	return mocks{
 		gethSynced: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/geth.json"),
@@ -199,7 +211,7 @@ func newMocks(t *testing.T) mocks {
 			"/eth/v1/config/spec":             fixture(t, "consensus/live/spec-publicnode-mainnet.json"),
 		}),
 		broken:   mockClient(t, nil), // 404 for everything
-		deadAddr: addr,
+		deadAddr: deadAddr,
 	}
 }
 

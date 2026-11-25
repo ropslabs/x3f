@@ -11,9 +11,30 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+// refusedAddr is an address that refusingClient never connects to: dialing
+// it fails with "connection refused". This is deterministic, unlike closing
+// a test server and reusing its port, which the OS may hand to another test
+// server in the meantime (seen as flaky failures).
+const refusedAddr = "refused.invalid:8545"
+
+// refusingClient returns a Client whose connections to refusedAddr are
+// refused; other addresses are dialed normally.
+func refusingClient() *Client {
+	var d net.Dialer
+	return NewClient(&http.Client{Transport: &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if addr == refusedAddr {
+				return nil, &net.OpError{Op: "dial", Net: network, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+			}
+			return d.DialContext(ctx, network, addr)
+		},
+	}})
+}
 
 // readFixture returns the contents of a file in testdata/ or fails the test.
 func readFixture(t *testing.T, name string) []byte {
@@ -317,12 +338,8 @@ func TestErrorsDoNotLeakURL(t *testing.T) {
 	}
 
 	t.Run("connection refused", func(t *testing.T) {
-		srv := httptest.NewServer(http.NotFoundHandler())
-		addr := srv.Listener.Addr().String()
-		srv.Close() // nothing listens on addr any more
-
-		_, err := NewClient(nil).ExecutionVersion(context.Background(), withKeys("http://"+addr))
-		assertClean(t, err, addr)
+		_, err := refusingClient().ExecutionVersion(context.Background(), withKeys("http://"+refusedAddr))
+		assertClean(t, err, refusedAddr, "refused.invalid")
 		if !strings.Contains(err.Error(), "connection failed") {
 			t.Errorf("error = %v, want connection failed", err)
 		}
@@ -400,11 +417,7 @@ func TestErrorsDoNotLeakURL(t *testing.T) {
 	t.Run("redacted error does not wrap original", func(t *testing.T) {
 		// The original *url.Error contains the full URL; it must not be
 		// reachable via errors.As either.
-		srv := httptest.NewServer(http.NotFoundHandler())
-		addr := srv.Listener.Addr().String()
-		srv.Close()
-
-		_, err := NewClient(nil).ExecutionVersion(context.Background(), withKeys("http://"+addr))
+		_, err := refusingClient().ExecutionVersion(context.Background(), withKeys("http://"+refusedAddr))
 		for e := err; e != nil; e = errors.Unwrap(e) {
 			if strings.Contains(e.Error(), pathKey) {
 				t.Errorf("wrapped error leaks secret: %v", e)
@@ -414,10 +427,6 @@ func TestErrorsDoNotLeakURL(t *testing.T) {
 }
 
 func TestIsTransportError(t *testing.T) {
-	refused := httptest.NewServer(http.NotFoundHandler())
-	refusedURL := refused.URL
-	refused.Close()
-
 	dnsFail := NewClient(&http.Client{Transport: &http.Transport{
 		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			return nil, &net.OpError{Op: "dial", Net: network, Err: &net.DNSError{Err: "no such host", Name: "x.example", IsNotFound: true}}
@@ -444,7 +453,7 @@ func TestIsTransportError(t *testing.T) {
 		ctx    time.Duration // 0 means no timeout
 		want   bool
 	}{
-		{"connection refused", NewClient(nil), refusedURL, 0, true},
+		{"connection refused", refusingClient(), "http://" + refusedAddr, 0, true},
 		{"dns failure", dnsFail, "http://x.example", 0, true},
 		{"timeout", NewClient(nil), hanging.URL, 50 * time.Millisecond, true},
 		{"json-rpc error", NewClient(nil), rpcError.URL, 0, false},
