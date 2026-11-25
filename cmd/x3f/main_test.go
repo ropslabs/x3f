@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
 )
@@ -1300,4 +1302,84 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(data)
+}
+
+// TestProxyFromEnvironment checks that GitHub and Telegram requests go
+// through the proxy in HTTPS_PROXY, and node requests to the local machine
+// do not. Go reads the proxy variables only once per process, so x3f runs
+// in a child process: this test binary again, started with
+// X3F_PROXY_CHILD=1. The proxy is a local mock that refuses every
+// connection, so nothing reaches the internet. Because GitHub is refused,
+// the node's advisories are unknown (yellow), which is a status change: so
+// x3f also tries to send a Telegram message.
+func TestProxyFromEnvironment(t *testing.T) {
+	if os.Getenv("X3F_PROXY_CHILD") == "1" {
+		proxyChild()
+		return
+	}
+
+	var mu sync.Mutex
+	var seen []string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, r.Method+" "+r.Host+" "+r.URL.String())
+		mu.Unlock()
+		http.Error(w, "refused by the test proxy", http.StatusForbidden)
+	}))
+	defer proxy.Close()
+
+	m := newMocks(t)
+	path := writeConfig(t, "telegram: {chat_id: 1}\nnodes:\n  - {name: a, execution_url: "+m.gethSynced.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestProxyFromEnvironment$")
+	for _, kv := range os.Environ() {
+		// Start from a clean proxy setup, whatever the machine has.
+		if name, _, _ := strings.Cut(kv, "="); !slices.Contains([]string{"HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"}, name) {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, "X3F_PROXY_CHILD=1", "HTTPS_PROXY="+proxy.URL,
+		"X3F_PROXY_CONFIG="+path, "X3F_PROXY_DIR="+t.TempDir())
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("child: %v\n%s", err, out)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, want := range []string{"CONNECT api.github.com:443", "CONNECT api.telegram.org:443"} {
+		if !slices.ContainsFunc(seen, func(s string) bool { return strings.HasPrefix(s, want) }) {
+			t.Errorf("proxy did not see %q; saw %q\n%s", want, seen, out)
+		}
+	}
+	for _, s := range seen {
+		// HTTPS through a proxy is a CONNECT to host:port; the path, and
+		// with it the bot token, stays inside the encrypted tunnel.
+		if !strings.HasPrefix(s, "CONNECT ") || strings.Contains(s, "AAtelegram") || strings.Contains(s, "127.0.0.1") {
+			t.Errorf("unexpected proxy request %q", s)
+		}
+	}
+	if strings.Contains(string(out), "AAtelegram") {
+		t.Errorf("output leaks the token:\n%s", out)
+	}
+	// The run itself worked: the nodes were reached directly.
+	if !strings.Contains(string(out), "Geth 1.17.10 (stable)") || !strings.Contains(string(out), "notification failed") {
+		t.Errorf("child output:\n%s", out)
+	}
+}
+
+// proxyChild runs x3f with the real GitHub and Telegram addresses and the
+// real HTTP clients, as main does.
+func proxyChild() {
+	dir := os.Getenv("X3F_PROXY_DIR")
+	e := env{
+		client:          ethereum.NewClient(nil),
+		githubBaseURL:   releases.DefaultBaseURL,
+		telegramBaseURL: notify.DefaultTelegramURL,
+		telegramToken:   telegramToken,
+		now:             time.Now,
+	}
+	run(context.Background(), []string{"-config", os.Getenv("X3F_PROXY_CONFIG"), "-timeout", "5s",
+		"-cache-dir", filepath.Join(dir, "cache"), "-state-file", filepath.Join(dir, "state.json")},
+		os.Stdout, os.Stdout, e)
 }
