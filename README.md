@@ -177,6 +177,25 @@ x3f reads the published [security advisories](https://docs.github.com/en/code-se
 
 "none known" does not mean "no known vulnerabilities": x3f only sees what a client publishes as a GitHub advisory. As of November 2026, Reth, Nethermind, Ethrex, Prysm, Nimbus and Grandine had none published there; check their release notes and security channels as well.
 
+#### Ignoring an advisory
+
+If an advisory does not apply to your setup, list it in `x3f.yaml`, for all nodes or for one:
+
+```yaml
+ignore_advisories:
+  - id: GHSA-v5gq-r843-8f73
+    reason: "private networks only; we run mainnet"   # required
+    expires: 2027-03-01                                # optional
+nodes:
+  - name: mainnet-1
+    # ...
+    ignore_advisories:                                 # adds to the global list
+      - id: GHSA-m886-r6ch-pjvr
+        reason: "QBFT/IBFT2 only; we run mainnet"
+```
+
+An ignored advisory no longer counts for the status and the ADVISORIES column, but it is still listed as a note with its reason, so nothing disappears silently. From the `expires` date (00:00 UTC) the entry no longer applies: the advisory counts again and a note says so. A node entry replaces a global entry with the same ID. An ID that is not among the advisories of the clients it applies to is reported as a note, to catch typos. For a global entry these are the clients your nodes run, so the note may also mean the entry is for a client none of them runs right now. This check only runs when x3f knows every client and its advisories.
+
 ### Environment
 
 `GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `NO_COLOR` disables colors.

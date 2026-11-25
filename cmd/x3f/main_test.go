@@ -330,6 +330,76 @@ nodes:
 	}
 }
 
+// TestRunIgnoreAdvisories checks the ignore lists end to end with the
+// recorded advisories.
+func TestRunIgnoreAdvisories(t *testing.T) {
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	cfg := func(extraNode string) string {
+		return writeConfig(t, `
+ignore_advisories:
+  - {id: GHSA-v5gq-r843-8f73, reason: "no private networks", expires: 2027-03-01}
+  - {id: GHSA-zzzz-zzzz-zzzz, reason: "typo"}
+nodes:
+  - name: besu
+    execution_url: `+m.besuOutdated.URL+`
+    beacon_url: `+m.nimbusSynced.URL+`
+    ignore_advisories:
+      - {id: GHSA-4h4f-925g-8h9p, reason: "was waiting for 26.8.0", expires: 2026-09-01}
+  - name: geth
+    execution_url: `+m.gethSynced.URL+`
+    beacon_url: `+m.lighthouseSynced.URL+`
+    ignore_advisories:
+      - {id: GHSA-mp5j-q856-vvx7, reason: "meant for the besu node"}
+`+extraNode)
+	}
+	run1 := func(path string) (int, string) {
+		var out bytes.Buffer
+		code := run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir()}, &out, &out, testEnv(gh, now))
+		return code, out.String()
+	}
+
+	code, out := run1(cfg(""))
+	if code != exitCrit {
+		t.Errorf("exit code = %d, want %d\n%s", code, exitCrit, out)
+	}
+	// The ignored "all" advisory no longer counts; the expired entry does.
+	if cells := rowCells(t, out, "besu"); cells[8] != "EL 38 (high)" {
+		t.Errorf("besu advisories cell = %q, want %q", cells[8], "EL 38 (high)")
+	}
+	for _, want := range []string{
+		`NOTE  ignore_advisories: GHSA-zzzz-zzzz-zzzz not found in the advisories of the clients in use (Besu, Geth, Lighthouse, Nimbus): a typo, or for a client none of your nodes runs? (reason "typo")`,
+		"NOTE  besu execution advisories: the ignore_advisories entry for GHSA-4h4f-925g-8h9p expired on 2026-09-01, the advisory counts again",
+		`NOTE  besu execution advisories: 1 ignored advisory for Besu 23.1.1 (ignore_advisories): GHSA-v5gq-r843-8f73 (medium: "SEC-50`,
+		`reason "no private networks", until 2027-03-01`,
+		"NOTE  geth ignore_advisories: GHSA-mp5j-q856-vvx7 is not a published advisory of Geth or Lighthouse; check the ID for a typo",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output does not contain %q:\n%s", want, out)
+		}
+	}
+	for _, unwanted := range []string{"cannot tell whether", "besu ignore_advisories", "GHSA-v5gq-r843-8f73 is not"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("output contains %q:\n%s", unwanted, out)
+		}
+	}
+
+	// With a node whose clients are unknown, an unknown global ID might
+	// belong to them: no typo note then.
+	_, out = run1(cfg("  - {name: down, execution_url: http://" + m.deadAddr + ", beacon_url: " + m.broken.URL + "}\n"))
+	if strings.Contains(out, "GHSA-zzzz-zzzz-zzzz") || !strings.Contains(out, "geth ignore_advisories: GHSA-mp5j") {
+		t.Errorf("with an unreachable node:\n%s", out)
+	}
+
+	// Without advisory data nothing can be checked.
+	gh.down.Store(true)
+	defer gh.down.Store(false)
+	_, out = run1(cfg(""))
+	if strings.Contains(out, "is not a published advisory") || strings.Contains(out, "not found in the advisories") {
+		t.Errorf("GitHub down:\n%s", out)
+	}
+}
+
 func TestRunExitCodes(t *testing.T) {
 	m := newMocks(t)
 	gh := newFakeGitHub(t)

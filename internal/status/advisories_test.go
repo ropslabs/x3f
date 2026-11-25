@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/releases"
 )
@@ -279,5 +280,158 @@ func TestAssessAdvisoriesCleansText(t *testing.T) {
 	}
 	if !strings.Contains(msg, `"evil [2J [31m title with newline xxx`) || !strings.Contains(msg, `x…")`) {
 		t.Errorf("finding = %q", msg)
+	}
+}
+
+// TestAssessAdvisoriesIgnore uses the recorded Besu advisories. Besu
+// 26.10.2 is affected by GHSA-mp5j-q856-vvx7 (medium) and three low ones
+// (GHSA-2vfg-f2fr-2jrv, GHSA-pvgm-f647-f7vc, GHSA-4c5c-6mr5-vxrh);
+// GHSA-v5gq-r843-8f73 ("all", no fix) is unclear.
+func TestAssessAdvisoriesIgnore(t *testing.T) {
+	now := time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)
+	advs := &releases.AdvisoryResult{Advisories: recorded[releases.Advisory](t, "advisories", "besu-eth_besu.json"), FetchedAt: now}
+	rels := &releases.Result{Releases: recorded[releases.Release](t, "", "besu-eth_besu.json"), FetchedAt: now}
+	day := func(s string) config.Date {
+		d, err := time.Parse(time.DateOnly, s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return config.Date{Time: d}
+	}
+	entry := func(id, reason, expires string) config.AdvisoryIgnore {
+		e := config.AdvisoryIgnore{ID: id, Reason: reason}
+		if expires != "" {
+			e.Expires = day(expires)
+		}
+		return e
+	}
+
+	tests := []struct {
+		name   string
+		ignore []config.AdvisoryIgnore
+		level  Level
+		cell   string
+		// want are the findings, each as a substring, in this order.
+		want []string
+	}{
+		{
+			name: "medium and the unclear one ignored",
+			ignore: []config.AdvisoryIgnore{
+				entry("GHSA-v5gq-r843-8f73", "we do not run private transactions", "2027-03-01"),
+				entry("GHSA-mp5j-q856-vvx7", "no snap sync", ""),
+			},
+			level: Warn, cell: "3 (low)",
+			want: []string{
+				"Besu 26.10.2 is affected by 3 published advisories (3 low), fixed in 26.11.0 or later",
+				`2 ignored advisories for Besu 26.10.2 (ignore_advisories): GHSA-mp5j-q856-vvx7 (medium: "Malformed peer receipts poison Besu's synced receipt store and break …"), ` +
+					`reason "no snap sync"; GHSA-v5gq-r843-8f73 (medium: "SEC-50 RLPx AES CTR keystream reusage #1315. (Case for private networ…"), ` +
+					`reason "we do not run private transactions", until 2027-03-01`,
+			},
+		},
+		{
+			name: "all ignored",
+			ignore: []config.AdvisoryIgnore{
+				entry("GHSA-v5gq-r843-8f73", "a", ""), entry("GHSA-mp5j-q856-vvx7", "b", ""),
+				entry("GHSA-2vfg-f2fr-2jrv", "c", ""), entry("GHSA-pvgm-f647-f7vc", "d", ""),
+				entry("GHSA-4c5c-6mr5-vxrh", "e", ""),
+			},
+			level: OK, cell: "none known",
+			want: []string{"5 ignored advisories for Besu 26.10.2"},
+		},
+		{
+			// The entry expires at 00:00 UTC on its date; now is noon.
+			name:   "expired entry counts again",
+			ignore: []config.AdvisoryIgnore{entry("GHSA-mp5j-q856-vvx7", "no snap sync", "2026-11-25")},
+			level:  Warn, cell: "4 (medium)",
+			want: []string{
+				"Besu 26.10.2 is affected by 4 published advisories (1 medium, 3 low)",
+				`the ignore_advisories entry for GHSA-mp5j-q856-vvx7 expired on 2026-11-25, the advisory counts again (reason was "no snap sync")`,
+				"cannot tell whether Besu 26.10.2 is affected by GHSA-v5gq-r843-8f73",
+			},
+		},
+		{
+			name:   "expires tomorrow: still ignored",
+			ignore: []config.AdvisoryIgnore{entry("GHSA-mp5j-q856-vvx7", "no snap sync", "2026-11-26")},
+			level:  Warn, cell: "3 (low)",
+			want: []string{
+				"(3 low)",
+				"1 ignored advisory for Besu 26.10.2 (ignore_advisories): GHSA-mp5j-q856-vvx7",
+				"cannot tell whether",
+			},
+		},
+		{
+			// Fixed in 26.8.1, so 26.10.2 is not affected: nothing to say.
+			name:   "ignored but not affecting",
+			ignore: []config.AdvisoryIgnore{entry("GHSA-m886-r6ch-pjvr", "no QBFT", "")},
+			level:  Warn, cell: "4 (medium)",
+			want: []string{"(1 medium, 3 low)", "cannot tell whether"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := AssessAdvisories(AdvisoryInput{
+				Version:    ethereum.ParseClientVersion("besu/v26.10.2/linux-x86_64/openjdk-java-21"),
+				Advisories: advs, Releases: rels, Ignore: tt.ignore, Now: now,
+			})
+			if r.Level != tt.level || r.Cell != tt.cell {
+				t.Errorf("level %v, cell %q; want %v, %q", r.Level, r.Cell, tt.level, tt.cell)
+			}
+			if len(r.Findings) != len(tt.want) {
+				t.Fatalf("%d findings, want %d: %+v", len(r.Findings), len(tt.want), r.Findings)
+			}
+			for i, f := range r.Findings {
+				if !strings.Contains(f.Message, tt.want[i]) {
+					t.Errorf("finding %d = %q, want it to contain %q", i, f.Message, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestAssessIgnoreList(t *testing.T) {
+	besu := recorded[releases.Advisory](t, "advisories", "besu-eth_besu.json")
+	geth := recorded[releases.Advisory](t, "advisories", "ethereum_go-ethereum.json")
+	entries := []config.AdvisoryIgnore{
+		{ID: "GHSA-v5gq-r843-8f73", Reason: "known Besu advisory"},
+		{ID: "GHSA-2gjw-fg97-vg3r", Reason: "known Geth advisory"},
+		{ID: "GHSA-v5gq-r843-8f37", Reason: "typo\x1b[31m"},
+	}
+	r := AssessIgnoreList(entries, [][]releases.Advisory{besu, geth}, []string{"Besu", "Geth"}, false)
+	if r.Level != OK || len(r.Findings) != 1 {
+		t.Fatalf("got %+v, want one note", r)
+	}
+	want := `GHSA-v5gq-r843-8f37 is not a published advisory of Besu or Geth; check the ID for a typo (reason "typo [31m")`
+	if r.Findings[0].Message != want {
+		t.Errorf("got  %q\nwant %q", r.Findings[0].Message, want)
+	}
+
+	// A global entry may be correct, for a client no node runs.
+	r = AssessIgnoreList(entries, [][]releases.Advisory{besu, geth}, []string{"Besu", "Geth"}, true)
+	want = `GHSA-v5gq-r843-8f37 not found in the advisories of the clients in use (Besu, Geth): a typo, or for a client none of your nodes runs? (reason "typo [31m")`
+	if len(r.Findings) != 1 || r.Findings[0].Message != want {
+		t.Errorf("global: got %+v\nwant %q", r.Findings, want)
+	}
+
+	// Without the Geth list, the Geth advisory looks unknown; that is why
+	// callers only pass complete data.
+	r = AssessIgnoreList(entries, [][]releases.Advisory{besu}, []string{"Besu"}, false)
+	if len(r.Findings) != 2 {
+		t.Errorf("got %+v, want two notes", r.Findings)
+	}
+}
+
+func TestOrList(t *testing.T) {
+	for _, tt := range []struct {
+		in   []string
+		want string
+	}{
+		{nil, ""},
+		{[]string{"Besu"}, "Besu"},
+		{[]string{"Besu", "Geth"}, "Besu or Geth"},
+		{[]string{"Besu", "Geth", "Nimbus"}, "Besu, Geth or Nimbus"},
+	} {
+		if got := orList(tt.in); got != tt.want {
+			t.Errorf("orList(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }

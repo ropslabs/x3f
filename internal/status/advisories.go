@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/releases"
 )
@@ -20,7 +21,9 @@ import (
 //	        released yet, check the advisory for mitigations");
 //	        advisories unknown or data older than 7 days
 //	note:   an advisory x3f cannot decide ("all" without a fix); GitHub
-//	        not reachable, cached data younger than 7 days
+//	        not reachable, cached data younger than 7 days; advisories
+//	        ignored in the config (they do not count otherwise); an
+//	        expired ignore entry (the advisory counts again)
 //
 // There is no grace period: a published advisory with a released fix is
 // exactly what x3f is meant to find.
@@ -42,7 +45,9 @@ type AdvisoryInput struct {
 	AdvisoriesErr error
 	// Releases, if known, is used to check that a fix is released.
 	Releases *releases.Result
-	Now      time.Time
+	// Ignore is the node's ignore list (global and node entries merged).
+	Ignore []config.AdvisoryIgnore
+	Now    time.Time
 }
 
 // AdvisoryResult is the assessment plus the text for the table cell.
@@ -58,6 +63,8 @@ type affectedBy struct {
 	adv      releases.Advisory
 	fix      releases.Version
 	released bool // a fix exists and is released
+	// ignore is the config entry, for advisories that are ignored.
+	ignore config.AdvisoryIgnore
 }
 
 // AssessAdvisories applies the advisory rules.
@@ -90,9 +97,24 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 		}
 	}
 
-	var fixed, unfixed, unclear []affectedBy
+	ignore := make(map[string]config.AdvisoryIgnore, len(in.Ignore))
+	for _, e := range in.Ignore {
+		ignore[strings.ToLower(e.ID)] = e
+	}
+
+	var fixed, unfixed, unclear, ignored []affectedBy
+	var expired []config.AdvisoryIgnore
 	for _, a := range in.Advisories.Advisories {
 		m, fix, hasFix := a.Check(v.Client, running)
+		if e, ok := ignore[strings.ToLower(a.GHSAID)]; ok {
+			if !e.Expired(in.Now) {
+				if m != releases.NotAffected {
+					ignored = append(ignored, affectedBy{adv: a, ignore: e})
+				}
+				continue
+			}
+			expired = append(expired, e)
+		}
 		switch m {
 		case releases.Unclear:
 			unclear = append(unclear, affectedBy{adv: a})
@@ -127,6 +149,13 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 			name, countAdvisories(unfixed, " without a released fix"), listAdvisories(unfixed), link)
 	}
 	// Notes last: they matter less than what is known to affect the node.
+	for _, e := range expired {
+		r.add(OK, "the ignore_advisories entry for %s expired on %s, the advisory counts again (reason was %q)",
+			e.ID, e.Expires.Format(time.DateOnly), clean(e.Reason, 80))
+	}
+	if len(ignored) > 0 {
+		r.add(OK, "%s for %s (ignore_advisories): %s", countIgnored(len(ignored)), name, listIgnored(ignored))
+	}
 	for _, u := range unclear {
 		r.add(OK, "cannot tell whether %s is affected by %s, check it yourself (affected versions %s, patched %s)",
 			name, describeAdvisory(u.adv), quoteRanges(u.adv, false), quoteRanges(u.adv, true))
@@ -214,6 +243,66 @@ func listAdvisories(as []affectedBy) string {
 		s += fmt.Sprintf(" and %d more", rest)
 	}
 	return s
+}
+
+func countIgnored(n int) string {
+	if n == 1 {
+		return "1 ignored advisory"
+	}
+	return fmt.Sprintf("%d ignored advisories", n)
+}
+
+// listIgnored names every ignored advisory with the reason from the
+// config. Unlike listAdvisories it lists all of them: the user chose each
+// one, and a short list hides nothing.
+func listIgnored(as []affectedBy) string {
+	var parts []string
+	for _, a := range as {
+		s := fmt.Sprintf("%s, reason %q", describeAdvisory(a.adv), clean(a.ignore.Reason, 80))
+		if !a.ignore.Expires.IsZero() {
+			s += ", until " + a.ignore.Expires.Format(time.DateOnly)
+		}
+		parts = append(parts, s)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// AssessIgnoreList reports ignore entries whose ID is in none of lists,
+// the published advisories of clients, so that typos do not go unnoticed.
+// global marks the global list: its entries apply to every node, so an
+// unknown ID may also be a correct one for a client no node runs at the
+// moment. The caller must only call it with complete data: a missing list
+// would make every entry for that client look unknown.
+func AssessIgnoreList(entries []config.AdvisoryIgnore, lists [][]releases.Advisory, clients []string, global bool) Assessment {
+	known := make(map[string]bool)
+	for _, l := range lists {
+		for _, a := range l {
+			known[strings.ToLower(a.GHSAID)] = true
+		}
+	}
+	var r Assessment
+	for _, e := range entries {
+		if known[strings.ToLower(e.ID)] {
+			continue
+		}
+		reason := clean(e.Reason, 80)
+		if global {
+			r.add(OK, "%s not found in the advisories of the clients in use (%s): a typo, or for a client none of your nodes runs? (reason %q)",
+				e.ID, strings.Join(clients, ", "), reason)
+		} else {
+			r.add(OK, "%s is not a published advisory of %s; check the ID for a typo (reason %q)",
+				e.ID, orList(clients), reason)
+		}
+	}
+	return r
+}
+
+// orList joins names as "A", "A or B", "A, B or C".
+func orList(names []string) string {
+	if len(names) <= 1 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " or " + names[len(names)-1]
 }
 
 // describeAdvisory renders e.g.

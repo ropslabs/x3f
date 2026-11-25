@@ -174,9 +174,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		grace:          time.Duration(*graceDays) * day,
 		schedule:       schedule,
 		forkCriticalIn: time.Duration(*forkCriticalDays) * day,
+		ignore:         cfg.IgnoreAdvisories,
 	})
 	var global []status.Finding
 	if f, ok := status.ForkDataNote(schedule, now); ok {
+		global = append(global, f)
+	}
+	// Global entries are checked against the clients of all nodes.
+	for _, f := range checkIgnoreList(cfg.IgnoreAdvisories, results, adv, true).Findings {
+		f.Message = "ignore_advisories: " + f.Message
 		global = append(global, f)
 	}
 	if err := printReport(stdout, rows, global, overall, e.color); err != nil {

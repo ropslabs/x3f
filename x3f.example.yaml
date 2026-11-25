@@ -4,6 +4,15 @@
 # Secrets (GitHub token, Telegram bot token) do NOT belong here;
 # they are read from environment variables.
 
+# Optional: security advisories that do not apply to your setup. They no
+# longer count for the status but are still listed as a note. reason is
+# required; from the expires date (YYYY-MM-DD) on, the advisory counts again.
+# Nodes can have their own ignore_advisories list as well.
+# ignore_advisories:
+#   - id: GHSA-v5gq-r843-8f73
+#     reason: "private networks only; we run mainnet"
+#     expires: 2027-03-01
+
 nodes:
   - name: mainnet-1
     # Execution client JSON-RPC (Geth, Reth, Nethermind, Erigon, Besu, Ethrex)

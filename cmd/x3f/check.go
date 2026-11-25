@@ -49,7 +49,10 @@ type layerResult[S, F any] struct {
 type nodeResult struct {
 	Name string
 	// Network is the expected network from the config ("" if not set).
-	Network   string
+	Network string
+	// Ignore is the node's own ignore_advisories list (without the
+	// global entries).
+	Ignore    []config.AdvisoryIgnore
 	Execution layerResult[ethereum.ExecutionSyncStatus, ethereum.ExecutionForkConfig]
 	Consensus layerResult[ethereum.ConsensusSyncStatus, ethereum.ConsensusForkConfig]
 }
@@ -65,6 +68,7 @@ func checkNodes(ctx context.Context, client *ethereum.Client, nodes []config.Nod
 	for i, n := range nodes {
 		results[i].Name = n.Name
 		results[i].Network = n.Network
+		results[i].Ignore = n.IgnoreAdvisories
 		// Since Go 1.22 every loop iteration has its own i and n, so the
 		// goroutines below capture this iteration's values.
 		//
@@ -244,6 +248,8 @@ type assessParams struct {
 	grace          time.Duration
 	schedule       *forks.Schedule
 	forkCriticalIn time.Duration
+	// ignore is the global ignore_advisories list.
+	ignore []config.AdvisoryIgnore
 }
 
 // assess evaluates all results. It returns the rows and the overall level.
@@ -257,8 +263,8 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 		}
 		return in
 	}
-	advisoryInput := func(v ethereum.ClientVersion, err error) status.AdvisoryInput {
-		in := status.AdvisoryInput{Version: v, Err: err, Now: now}
+	advisoryInput := func(v ethereum.ClientVersion, err error, ignore []config.AdvisoryIgnore) status.AdvisoryInput {
+		in := status.AdvisoryInput{Version: v, Err: err, Ignore: ignore, Now: now}
 		if repo, ok := releases.RepoFor(v.Client); ok {
 			d := adv[repo]
 			in.Advisories, in.AdvisoriesErr = d.result, d.err
@@ -280,8 +286,9 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 			ConsensusConfig: r.Consensus.ForkConfig, ConsensusConfigErr: r.Consensus.ForkConfigErr,
 			Now: now, CriticalWithin: p.forkCriticalIn,
 		})
-		ea := status.AssessAdvisories(advisoryInput(r.Execution.Version, r.Execution.VersionErr))
-		ca := status.AssessAdvisories(advisoryInput(r.Consensus.Version, r.Consensus.VersionErr))
+		ignore := config.MergeIgnores(p.ignore, r.Ignore)
+		ea := status.AssessAdvisories(advisoryInput(r.Execution.Version, r.Execution.VersionErr, ignore))
+		ca := status.AssessAdvisories(advisoryInput(r.Consensus.Version, r.Consensus.VersionErr, ignore))
 		a := []layerFindings{
 			{"network", status.AssessNetwork(status.NetworkInput{
 				Expected:    r.Network,
@@ -295,6 +302,7 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 			{"fork", fork.Assessment},
 			{"execution advisories", ea.Assessment},
 			{"consensus advisories", ca.Assessment},
+			{"ignore_advisories", checkIgnoreList(r.Ignore, []nodeResult{r}, adv, false)},
 		}
 		rw := row{
 			node: r.Name,
@@ -316,6 +324,34 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 		rows = append(rows, rw)
 	}
 	return rows, overall
+}
+
+// checkIgnoreList reports entries of an ignore list that are not
+// advisories of any client of nodes, so typos show up; global marks the
+// global list. It says nothing if a client could not be identified or its
+// advisories are unknown: the ID might belong to that client.
+func checkIgnoreList(entries []config.AdvisoryIgnore, nodes []nodeResult, adv map[releases.Repo]advisoryData, global bool) status.Assessment {
+	if len(entries) == 0 {
+		return status.Assessment{}
+	}
+	var lists [][]releases.Advisory
+	var seen []releases.Repo
+	var names []string
+	for _, r := range nodes {
+		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
+			repo, ok := releases.RepoFor(v.Client)
+			if !ok || adv[repo].result == nil {
+				return status.Assessment{}
+			}
+			if !slices.Contains(seen, repo) {
+				seen = append(seen, repo)
+				lists = append(lists, adv[repo].result.Advisories)
+				names = append(names, v.Client.String())
+			}
+		}
+	}
+	slices.Sort(names)
+	return status.AssessIgnoreList(entries, lists, names, global)
 }
 
 // detectedChain returns the node's chain ID for the fork check, preferring
