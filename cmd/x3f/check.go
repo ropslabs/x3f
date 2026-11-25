@@ -15,6 +15,7 @@ import (
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/forks"
 	"github.com/ropslabs/x3f/internal/network"
+	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
 )
@@ -324,6 +325,54 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 		rows = append(rows, rw)
 	}
 	return rows, overall
+}
+
+// notifyChanges sends a Telegram message about the nodes whose status
+// changed since the last message and updates the state file. It returns
+// global findings: a note naming the nodes in the message, or a warning if
+// it could not be sent or the state could not be read or written.
+func notifyChanges(ctx context.Context, tg *notify.Telegram, cfg *config.Telegram, rows []row, stateFile string, now time.Time, timeout time.Duration) []status.Finding {
+	prev, err := notify.LoadState(stateFile)
+	if err != nil {
+		return []status.Finding{{Level: status.Warn, Message: fmt.Sprintf("notifications skipped: %v", err)}}
+	}
+	nodes := make([]notify.Node, 0, len(rows))
+	for _, r := range rows {
+		n := notify.Node{Name: r.node, Level: r.level}
+		for _, f := range r.findings {
+			n.Checks = append(n.Checks, notify.Check{Name: f.name, Assessment: f.Assessment})
+		}
+		nodes = append(nodes, n)
+	}
+	minLevel := status.Warn
+	if cfg.MinLevel == "crit" {
+		minLevel = status.Crit
+	}
+	changes, next := notify.Evaluate(prev, nodes, notify.Options{MinLevel: minLevel, RemindEvery: cfg.Remind(), Now: now})
+
+	var out []status.Finding
+	if len(changes) > 0 {
+		ctx, cancel := context.WithTimeout(ctx, timeout)
+		err := tg.Send(ctx, notify.Format(changes, now, notify.MaxMessageLength))
+		cancel()
+		if err != nil {
+			next = notify.Undelivered(prev, next, changes)
+			out = append(out, status.Finding{Level: status.Warn,
+				Message: fmt.Sprintf("notification failed, will retry on the next run: %v", err)})
+		} else {
+			var names []string
+			for _, c := range changes {
+				names = append(names, c.Node.Name)
+			}
+			out = append(out, status.Finding{Level: status.OK,
+				Message: "Telegram message sent about " + strings.Join(names, ", ")})
+		}
+	}
+	if err := notify.SaveState(stateFile, next); err != nil {
+		out = append(out, status.Finding{Level: status.Warn,
+			Message: fmt.Sprintf("notification state not saved, changes may be reported again: %v", err)})
+	}
+	return out
 }
 
 // checkIgnoreList reports entries of an ignore list that are not

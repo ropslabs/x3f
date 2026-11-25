@@ -21,7 +21,11 @@ Goal: for each configured node, report whether its clients are up to date, wheth
    - Latest version: GitHub releases of each client repo
    - Vulnerabilities: GitHub security advisories of the same repos
    - Fork readiness: a curated `forks.yaml` (next fork, date, minimum version per client). There is no official machine-readable source for this, so the curated file is part of the product.
-4. **Output**: CLI table with green / yellow / red status, plus a Telegram alert when something turns red.
+4. **Output**: CLI table with green / yellow / red status, plus Telegram notifications:
+   - only on status changes per node (worse and back to good), using a state file; a red node that gets a second problem (a check gets worse) is reported too;
+   - `min_level` warn (default) or crit; with crit, leaving CRIT is still reported (all clear);
+   - a node that stays red gets at most one reminder per `remind_every` (default 24h, 0 disables);
+   - a failed notification is a global yellow finding (exit code at least 1) and is retried on the next run.
 
 **Out of scope for v1:** MEV-Boost (no version API), other chains, web UI, database, applying updates, the company/server module.
 
@@ -29,7 +33,8 @@ Goal: for each configured node, report whether its clients are up to date, wheth
 
 - **Language: Go** (current stable). Prefer the standard library; add dependencies only when clearly worth it, and say why.
 - Single static binary.
-- Secrets (GitHub token, Telegram bot token) come from environment variables, never from the config file and never in logs.
+- Secrets (GitHub token, Telegram bot token `X3F_TELEGRAM_BOT_TOKEN`) come from environment variables, never from the config file and never in logs. The bot token is part of the Telegram request URL: never print request URLs.
+- Telegram messages use `parse_mode` HTML with all dynamic text escaped; no MarkdownV2. The API address is not configurable (only tests replace it).
 - All HTTP calls have timeouts and context cancellation.
 - GitHub API is rate-limited (60 requests/hour without a token): cache responses on disk and support an optional token.
 
@@ -43,7 +48,7 @@ internal/ethereum/    query clients (version, sync status, chain ID, fork config
 internal/releases/    GitHub releases (with disk cache) and security advisories, version comparison
 internal/status/      green / yellow / red rules and findings
 internal/forks/       load and evaluate forks.yaml
-internal/notify/      Telegram
+internal/notify/      decide what to notify (state file) and send it to Telegram
 internal/*/testdata/  per-package test fixtures (e.g. recorded API responses), with their source noted
 scripts/              release build (build-release.sh)
 .github/workflows/    CI (gofmt, vet, test -race, build) and release
@@ -89,10 +94,10 @@ scripts/              release build (build-release.sh)
 3. Compare against GitHub releases (with caching)
 4. `forks.yaml` and fork-readiness check
 5. GitHub security advisories
-6. Telegram alerts
+6. Telegram notifications on status changes
 7. Prometheus metrics (e.g. a file for the node_exporter textfile collector)
 
-Steps 1–5 are done (1–4 released as v0.1.0). Later, not scheduled yet: Nagios output format (with the company module; the first audience, solo stakers, uses Prometheus, Grafana and Telegram) and the forkId check.
+Steps 1–6 are done (1–4 released as v0.1.0). Later, not scheduled yet: Nagios output format (with the company module; the first audience, solo stakers, uses Prometheus, Grafana and Telegram) and the forkId check.
 
 While working on steps 5–7: where it costs no extra effort, do not hard-wire logic to the execution/consensus pair, so the component model below stays a small refactor.
 
@@ -100,6 +105,7 @@ While working on steps 5–7: where it costs no extra effort, do not hard-wire l
 
 Recorded for later; not part of v1, do not implement yet.
 
-1. **General component model.** A component has a type, a version source, an upstream repository and a health check. Execution and consensus clients become the first types: compiled-in implementations of one shared interface, not Go's `plugin` package.
-2. **Local web UI** on top of that model: `x3f serve`, embedded in the binary, listening on localhost by default, read-only.
-3. **New component types:** validator client, MEV-Boost, later L2 nodes and indexers.
+1. **Damping against flapping**, directly after version 1: report a status change only after it persisted for two runs, at least for "unreachable", so a single timeout does not cause two messages.
+2. **General component model.** A component has a type, a version source, an upstream repository and a health check. Execution and consensus clients become the first types: compiled-in implementations of one shared interface, not Go's `plugin` package.
+3. **Local web UI** on top of that model: `x3f serve`, embedded in the binary, listening on localhost by default, read-only.
+4. **New component types:** validator client, MEV-Boost, later L2 nodes and indexers.

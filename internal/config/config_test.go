@@ -348,3 +348,63 @@ nodes:
 		t.Error("entry without expires expired")
 	}
 }
+
+func TestTelegram(t *testing.T) {
+	parse := func(telegram string) (*Config, error) {
+		return Parse([]byte(telegram + `
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+`))
+	}
+
+	cfg, err := parse("")
+	if err != nil || cfg.Telegram != nil {
+		t.Fatalf("no telegram section: %+v, %v", cfg.Telegram, err)
+	}
+
+	// An unquoted number is a YAML integer; it still decodes into the
+	// string field.
+	cfg, err = parse("telegram:\n  chat_id: -1001234567890\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tg := cfg.Telegram
+	if tg.ChatID != "-1001234567890" || tg.MinLevel != "warn" || tg.Remind() != 24*time.Hour {
+		t.Errorf("defaults: %+v, remind %v", tg, tg.Remind())
+	}
+
+	cfg, err = parse("telegram: {chat_id: \"@x3f_alerts\", min_level: CRIT, remind_every: 0}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tg := cfg.Telegram; tg.ChatID != "@x3f_alerts" || tg.MinLevel != "crit" || tg.Remind() != 0 {
+		t.Errorf("explicit: %+v, remind %v", tg, tg.Remind())
+	}
+	cfg, err = parse("telegram: {chat_id: 42, remind_every: 6h30m}\n")
+	if err != nil || cfg.Telegram.Remind() != 6*time.Hour+30*time.Minute {
+		t.Errorf("remind_every 6h30m: %v", err)
+	}
+
+	for _, tt := range []struct{ yaml, want string }{
+		{"telegram: {}", "telegram: chat_id must be a numeric chat ID or @channelname"},
+		{"telegram: {chat_id: 1, min_level: info}", `telegram: min_level "info" is not warn or crit`},
+		{"telegram: {chat_id: 1, remind_every: 24}", `"24" is not a duration such as 24h, 90m or 0`},
+		{"telegram: {chat_id: 1, remind_every: -1h}", `"-1h" is not a duration`},
+		// The bot token belongs in X3F_TELEGRAM_BOT_TOKEN.
+		{"telegram: {chat_id: 1, bot_token: x}", "field bot_token not found"},
+	} {
+		_, err := parse(tt.yaml + "\n")
+		if err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%s: error %v, want %q", tt.yaml, err, tt.want)
+		}
+	}
+
+	// A token pasted as chat_id is not echoed.
+	const token = "123456789:AAsecret-token-not-real" // gitleaks:allow (test dummy)
+	_, err = parse("telegram: {chat_id: \"" + token + "\"}\n")
+	if err == nil || strings.Contains(err.Error(), "AAsecret") {
+		t.Errorf("error = %v", err)
+	}
+}

@@ -4,6 +4,13 @@
 # Secrets (GitHub token, Telegram bot token) do NOT belong here;
 # they are read from environment variables.
 
+# Optional: Telegram message when a node's status changes. The bot token is
+# read from the environment variable X3F_TELEGRAM_BOT_TOKEN, never from here.
+# telegram:
+#   chat_id: "-1001234567890"   # numeric chat ID, or "@channelname"
+#   min_level: warn             # warn (default) or crit
+#   remind_every: 24h           # reminder while a node stays red, 0 = never
+
 # Optional: security advisories that do not apply to your setup. They no
 # longer count for the status but are still listed as a note. reason is
 # required; from the expires date (YYYY-MM-DD) on, the advisory counts again.

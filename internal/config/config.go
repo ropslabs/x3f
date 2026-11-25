@@ -23,6 +23,8 @@ import (
 
 // Config is the top-level structure of x3f.yaml.
 type Config struct {
+	// Telegram enables notifications; nil if not configured.
+	Telegram *Telegram `yaml:"telegram,omitempty"`
 	// IgnoreAdvisories applies to every node.
 	IgnoreAdvisories []AdvisoryIgnore `yaml:"ignore_advisories,omitempty"`
 	Nodes            []Node           `yaml:"nodes"`
@@ -64,6 +66,70 @@ func (d *Date) UnmarshalYAML(n *yaml.Node) error {
 	}
 	d.Time = t
 	return nil
+}
+
+// Telegram configures notifications through a Telegram bot. The bot token
+// is deliberately not here: it comes from the environment variable
+// X3F_TELEGRAM_BOT_TOKEN.
+type Telegram struct {
+	// ChatID is a numeric chat ID or "@channelname".
+	ChatID string `yaml:"chat_id"`
+	// MinLevel is "warn" (default) or "crit": the lowest status a node
+	// change must reach to be reported. Leaving CRIT is always reported.
+	// Validate normalizes it to lowercase and fills in the default.
+	MinLevel string `yaml:"min_level,omitempty"`
+	// RemindEvery is the reminder interval for a node that stays CRIT;
+	// nil means DefaultRemindEvery, 0 disables reminders.
+	RemindEvery *Duration `yaml:"remind_every,omitempty"`
+}
+
+// DefaultRemindEvery is the reminder interval if remind_every is not set.
+const DefaultRemindEvery = 24 * time.Hour
+
+// Remind returns the reminder interval.
+func (t *Telegram) Remind() time.Duration {
+	if t.RemindEvery == nil {
+		return DefaultRemindEvery
+	}
+	return t.RemindEvery.Duration
+}
+
+// Duration is a duration written like "24h" or "90m" (Go syntax).
+type Duration struct {
+	time.Duration
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler, like Date.
+func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
+	v, err := time.ParseDuration(n.Value)
+	if n.Kind != yaml.ScalarNode || err != nil || v < 0 {
+		return fmt.Errorf("line %d: %q is not a duration such as 24h, 90m or 0", n.Line, n.Value)
+	}
+	d.Duration = v
+	return nil
+}
+
+// chatIDRe matches a numeric chat ID (groups and channels are negative) or
+// a public channel name.
+var chatIDRe = regexp.MustCompile(`^(-?[0-9]+|@[A-Za-z0-9_]{5,32})$`)
+
+func (t *Telegram) validate() []error {
+	var errs []error
+	t.ChatID = strings.TrimSpace(t.ChatID)
+	if !chatIDRe.MatchString(t.ChatID) {
+		// The value is not repeated: if someone pasted the bot token
+		// here by mistake, it must not end up in the output.
+		errs = append(errs, errors.New("telegram: chat_id must be a numeric chat ID or @channelname"))
+	}
+	switch m := strings.ToLower(strings.TrimSpace(t.MinLevel)); m {
+	case "":
+		t.MinLevel = "warn"
+	case "warn", "crit":
+		t.MinLevel = m
+	default:
+		errs = append(errs, fmt.Errorf("telegram: min_level %q is not warn or crit", t.MinLevel))
+	}
+	return errs
 }
 
 // MergeIgnores returns the ignore list for one node: its own entries plus
@@ -145,6 +211,9 @@ func (c *Config) Validate() error {
 		errs = append(errs, errors.New("no nodes configured"))
 	}
 	errs = append(errs, validateIgnores("ignore_advisories", c.IgnoreAdvisories)...)
+	if c.Telegram != nil {
+		errs = append(errs, c.Telegram.validate()...)
+	}
 
 	// map[string]bool used as a set to detect duplicate names.
 	seen := make(map[string]bool)

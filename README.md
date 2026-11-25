@@ -4,7 +4,7 @@
 
 x3f tells you what is running where, in which version, who owns it, and what needs attention next: known vulnerabilities, end-of-life dates and, for blockchain nodes, upcoming hard forks.
 
-> **Status:** early stage (v0.x). The Ethereum node check below works today, including known security advisories of the clients; inventory and alerts are planned. Flags and output may still change between 0.x releases.
+> **Status:** early stage (v0.x). The Ethereum node check below works today, including known security advisories of the clients and Telegram notifications on status changes; inventory is planned. Flags and output may still change between 0.x releases.
 >
 > *An n-day is a known vulnerability that already has a fix. Many attacks don't need a zero-day, just a system where the existing patch was never applied. x3f finds those systems.*
 
@@ -12,7 +12,7 @@ x3f tells you what is running where, in which version, who owns it, and what nee
 
 ## Quick start
 
-x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, whether a published security advisory affects them, and whether they are ready for the next hard fork. It is a single binary that only reads from your nodes.
+x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, whether a published security advisory affects them, and whether they are ready for the next hard fork. It can send a Telegram message when a node's status changes. It is a single binary that only reads from your nodes.
 
 ### Install
 
@@ -114,7 +114,7 @@ Built with solo stakers and small validator teams in mind, people who run nodes 
 
 ## Usage
 
-> What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release, security advisories of the client repositories and fork readiness (asked from the node itself, with the announced client releases as fallback). Alerts are not built yet.
+> What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release, security advisories of the client repositories, fork readiness (asked from the node itself, with the announced client releases as fallback) and Telegram notifications on status changes.
 
 Example output:
 
@@ -161,6 +161,9 @@ If GitHub is unreachable, cached release and advisory data younger than 7 days i
 | `-cache-ttl` | `1h` | how long cached data is used without asking GitHub |
 | `-forks` | built in | fork schedule file to use instead of the built-in one |
 | `-fork-critical-days` | `14` | days before a fork from which a client that is not ready turns red |
+| `-state-file` | `~/.local/state/x3f/state.json` | where x3f remembers what it last notified about (`$XDG_STATE_HOME` is respected) |
+| `-no-notify` | | send no notifications and leave the state file alone, for manual runs |
+| `-notify-test` | | send a test message to the configured Telegram chat and exit |
 | `-version` | | print the version and exit |
 
 ### Fork readiness
@@ -196,9 +199,50 @@ nodes:
 
 An ignored advisory no longer counts for the status and the ADVISORIES column, but it is still listed as a note with its reason, so nothing disappears silently. From the `expires` date (00:00 UTC) the entry no longer applies: the advisory counts again and a note says so. A node entry replaces a global entry with the same ID. An ID that is not among the advisories of the clients it applies to is reported as a note, to catch typos. For a global entry these are the clients your nodes run, so the note may also mean the entry is for a client none of them runs right now. This check only runs when x3f knows every client and its advisories.
 
+### Telegram notifications
+
+x3f can send a Telegram message when a node's status changes. Create a bot with [@BotFather](https://core.telegram.org/bots/features#botfather), start a chat with it or add it to a group or channel, and add the chat to `x3f.yaml`:
+
+```yaml
+telegram:
+  chat_id: "-1001234567890"   # numeric chat ID, or "@channelname"
+  min_level: warn             # optional: warn (default) or crit
+  remind_every: 24h           # optional: reminder while a node stays red, 0 = never
+```
+
+The bot token never goes into the config: x3f reads it from `X3F_TELEGRAM_BOT_TOKEN` and never stores or prints it. To find the chat ID, send the bot a message and call the Bot API method [`getUpdates`](https://core.telegram.org/bots/api#getupdates). Check the setup with:
+
+```sh
+X3F_TELEGRAM_BOT_TOKEN=... x3f -config x3f.yaml -notify-test
+```
+
+When x3f sends a message:
+
+- **A node's status changes**, worse or back to good: OK → WARN, WARN → CRIT, CRIT → OK and so on. With `min_level: crit` only changes to and from red are reported; OK ↔ WARN is then silent.
+- **A red node gets a second problem:** one of its checks gets worse (to at least `min_level`), for example a new advisory while it is already red because of the fork check.
+- **A node stays red:** a reminder once per `remind_every` (default 24 hours).
+
+All changes of one run go into one message, with the node's WARN and CRIT findings:
+
+```
+🔴 mainnet-2: CRIT (was OK)
+• CRIT execution: Besu dev build of 23.1.1 ("dev"): stable 23.1.1 released …
+• CRIT execution advisories: Besu 23.1.1 is affected by 38 published advisories …
+```
+
+x3f compares status levels, not finding texts, so a finding whose wording changes on every run ("8 days old") does not cause a message each time. What was last reported is kept in the state file (`-state-file`). The first run reports every node that is not OK.
+
+If a message cannot be sent (Telegram unreachable, wrong token or chat), the nodes' status does not change, but the run gets a yellow finding and exits with at least `1`, so a broken alert path does not go unnoticed. The message is sent again on the next run, with the time the problem started.
+
+For manual runs next to a cron job, use `-no-notify`: it sends nothing and leaves the state file alone, so the cron job still reports every change.
+
+x3f does not yet dampen flapping: a node that is unreachable for a single run causes two messages (red, then back to good). Waiting for a second run before reporting is planned.
+
+The Telegram API address (`https://api.telegram.org`) is built in and cannot be configured, because the bot token is part of every request URL. The tests replace it internally with a mock server; that is a test setting only, not an option.
+
 ### Environment
 
-`GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `NO_COLOR` disables colors.
+`GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `X3F_TELEGRAM_BOT_TOKEN` is the Telegram bot token, required if the config has a `telegram` section (see [above](#telegram-notifications)); it is never stored or printed. `NO_COLOR` disables colors.
 
 ### Exit codes
 
@@ -207,7 +251,7 @@ The exit codes follow the [Nagios plugin convention](https://nagios-plugins.org/
 | Code | Meaning |
 |---|---|
 | `0` | OK: everything is green |
-| `1` | WARNING: at least one yellow finding |
+| `1` | WARNING: at least one yellow finding (also: a notification could not be sent) |
 | `2` | CRITICAL: at least one red finding |
 | `3` | UNKNOWN: x3f could not run (invalid flags or config) |
 

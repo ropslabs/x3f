@@ -1,5 +1,6 @@
 // Command x3f reports whether Ethereum node clients are up to date,
-// in sync, affected by known advisories and ready for the next hard fork.
+// in sync, affected by known advisories and ready for the next hard fork,
+// and sends a Telegram message when a node's status changes.
 package main
 
 import (
@@ -16,6 +17,7 @@ import (
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/forks"
+	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
 )
@@ -40,31 +42,41 @@ are ready for the next fork: the node's own fork schedule (eth_config,
 client does not report it, its version is compared with the announced
 releases.
 
+With a telegram section in the config, x3f sends a Telegram message when a
+node's status changes (see -state-file).
+
 Flags:
 `
 
 const helpFooter = `
 Exit codes (Nagios plugin convention):
   0  OK       everything is green
-  1  WARNING  at least one yellow finding
+  1  WARNING  at least one yellow finding, or a notification failed
   2  CRITICAL at least one red finding
   3  UNKNOWN  x3f could not run (invalid flags or config)
 
 Environment:
-  GITHUB_TOKEN  optional GitHub token; raises the API rate limit from 60 to
-                5000 requests per hour. Never stored or printed.
-  NO_COLOR      disables colored output when set to a non-empty value.
+  GITHUB_TOKEN            optional GitHub token; raises the API rate limit
+                          from 60 to 5000 requests per hour. Never stored or
+                          printed.
+  X3F_TELEGRAM_BOT_TOKEN  Telegram bot token, required if the config has a
+                          telegram section. Never stored or printed.
+  NO_COLOR                disables colored output when set to a non-empty
+                          value.
 `
 
 // env bundles what run needs from the outside world, so tests can replace
-// it: the HTTP client for nodes, the GitHub API location and token, the
-// clock and whether to use colors.
+// it: the HTTP client for nodes, the GitHub and Telegram API locations and
+// tokens, the clock and whether to use colors. The API locations are not
+// settings: only tests change them.
 type env struct {
-	client        *ethereum.Client
-	githubBaseURL string
-	githubToken   string
-	now           func() time.Time
-	color         bool
+	client          *ethereum.Client
+	githubBaseURL   string
+	githubToken     string
+	telegramBaseURL string
+	telegramToken   string
+	now             func() time.Time
+	color           bool
 }
 
 func main() {
@@ -73,11 +85,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, env{
-		client:        ethereum.NewClient(nil),
-		githubBaseURL: releases.DefaultBaseURL,
-		githubToken:   os.Getenv("GITHUB_TOKEN"),
-		now:           time.Now,
-		color:         useColor(os.Stdout),
+		client:          ethereum.NewClient(nil),
+		githubBaseURL:   releases.DefaultBaseURL,
+		githubToken:     os.Getenv("GITHUB_TOKEN"),
+		telegramBaseURL: notify.DefaultTelegramURL,
+		telegramToken:   os.Getenv("X3F_TELEGRAM_BOT_TOKEN"),
+		now:             time.Now,
+		color:           useColor(os.Stdout),
 	})
 	// os.Exit skips deferred calls, so stop is called explicitly.
 	stop()
@@ -113,6 +127,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	cacheTTL := fs.Duration("cache-ttl", time.Hour, "how long cached GitHub data is used without asking GitHub")
 	forksPath := fs.String("forks", "", "fork schedule file to use instead of the built-in one")
 	forkCriticalDays := fs.Int("fork-critical-days", 14, "days before a fork from which a client that is not ready turns red (if a ready release exists)")
+	stateFile := fs.String("state-file", defaultStateFile(), "file where x3f remembers what it last notified about")
+	noNotify := fs.Bool("no-notify", false, "send no notifications and leave the state file alone (for manual runs)")
+	notifyTest := fs.Bool("notify-test", false, "send a test message to the configured Telegram chat and exit")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 
 	if err := fs.Parse(args); err != nil {
@@ -152,6 +169,29 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		return fail("%v", err)
 	}
 
+	var tg *notify.Telegram
+	if cfg.Telegram != nil && !*noNotify {
+		if e.telegramToken == "" {
+			return fail("the config has a telegram section, but X3F_TELEGRAM_BOT_TOKEN is not set (-no-notify runs without notifications)")
+		}
+		if *stateFile == "" {
+			return fail("-state-file is required for notifications")
+		}
+		tg = &notify.Telegram{BaseURL: e.telegramBaseURL, Token: e.telegramToken, ChatID: cfg.Telegram.ChatID}
+	}
+	if *notifyTest {
+		if tg == nil {
+			return fail("-notify-test needs a telegram section in the config (and no -no-notify)")
+		}
+		ctx, cancel := context.WithTimeout(ctx, *timeout)
+		defer cancel()
+		if err := tg.Send(ctx, "✅ x3f test message: notifications to this chat work."); err != nil {
+			return fail("%v", err)
+		}
+		fmt.Fprintln(stdout, "Test message sent.")
+		return exitOK
+	}
+
 	results := checkNodes(ctx, e.client, cfg.Nodes, *timeout)
 
 	src := &releases.Source{
@@ -185,6 +225,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		f.Message = "ignore_advisories: " + f.Message
 		global = append(global, f)
 	}
+	if tg != nil {
+		global = append(global, notifyChanges(ctx, tg, cfg.Telegram, rows, *stateFile, now, *timeout)...)
+	}
+	// A failed notification is a problem of its own: the exit code shows
+	// it even if every node is fine.
+	for _, f := range global {
+		overall = max(overall, f.Level)
+	}
 	if err := printReport(stdout, rows, global, overall, e.color); err != nil {
 		return fail("%v", err)
 	}
@@ -206,6 +254,21 @@ func loadSchedule(path string) (*forks.Schedule, error) {
 		return forks.Default()
 	}
 	return forks.LoadFile(path)
+}
+
+// defaultStateFile returns $XDG_STATE_HOME/x3f/state.json, by default
+// ~/.local/state/x3f/state.json. Not the cache directory: a cache may be
+// deleted at any time, the state may not. Empty if it cannot be determined.
+func defaultStateFile() string {
+	dir := os.Getenv("XDG_STATE_HOME")
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		dir = filepath.Join(home, ".local", "state")
+	}
+	return filepath.Join(dir, "x3f", "state.json")
 }
 
 // defaultCacheDir returns the per-user cache directory, e.g. ~/.cache/x3f

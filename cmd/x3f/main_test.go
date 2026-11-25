@@ -493,7 +493,7 @@ func TestRunUsageErrors(t *testing.T) {
 func TestHelpDocumentsExitCodesAndEnvironment(t *testing.T) {
 	var errOut bytes.Buffer
 	run(context.Background(), []string{"-help"}, &bytes.Buffer{}, &errOut, env{})
-	for _, want := range []string{"0  OK", "1  WARNING", "2  CRITICAL", "3  UNKNOWN", "GITHUB_TOKEN", "NO_COLOR", "-grace-days", "-cache-ttl"} {
+	for _, want := range []string{"0  OK", "1  WARNING", "2  CRITICAL", "3  UNKNOWN", "GITHUB_TOKEN", "X3F_TELEGRAM_BOT_TOKEN", "NO_COLOR", "-grace-days", "-cache-ttl", "-state-file", "-no-notify", "-notify-test"} {
 		if !strings.Contains(errOut.String(), want) {
 			t.Errorf("help lacks %q:\n%s", want, errOut.String())
 		}
@@ -1110,4 +1110,194 @@ func TestFormatAdvisories(t *testing.T) {
 			t.Errorf("formatAdvisories(%q, %q) = %q, want %q", tt.el, tt.cl, got, tt.want)
 		}
 	}
+}
+
+// fakeTelegram is a mock Bot API for the CLI tests. It answers with a
+// fixture from internal/notify/testdata/telegram (sources in SOURCES.md
+// there) and records the message texts.
+type fakeTelegram struct {
+	*httptest.Server
+	mu      sync.Mutex
+	status  int
+	fixture string
+	texts   []string
+	paths   []string
+}
+
+func newFakeTelegram(t *testing.T) *fakeTelegram {
+	t.Helper()
+	f := &fakeTelegram{status: http.StatusOK, fixture: "ok.json"}
+	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Text string `json:"text"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.texts = append(f.texts, body.Text)
+		f.paths = append(f.paths, r.URL.Path)
+		data, err := os.ReadFile(filepath.Join("..", "..", "internal", "notify", "testdata", "telegram", f.fixture))
+		if err != nil {
+			t.Error(err)
+		}
+		w.WriteHeader(f.status)
+		w.Write(data)
+	}))
+	t.Cleanup(f.Close)
+	return f
+}
+
+// answer sets the reply for the following requests.
+func (f *fakeTelegram) answer(status int, fixture string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.status, f.fixture = status, fixture
+}
+
+// sent returns the texts received since the last call.
+func (f *fakeTelegram) sent() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	texts := f.texts
+	f.texts = nil
+	return texts
+}
+
+const telegramToken = "123456789:AAtelegram-test-token" // gitleaks:allow (test dummy)
+
+func TestRunTelegram(t *testing.T) {
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	tg := newFakeTelegram(t)
+	state := filepath.Join(t.TempDir(), "state", "x3f.json")
+	cache := t.TempDir()
+
+	// Node "a" is the outdated Besu node (CRIT) or a healthy one (OK).
+	cfg := func(execution, beacon string) string {
+		return writeConfig(t, "telegram:\n  chat_id: -1001234567890\nnodes:\n  - {name: a, execution_url: "+execution+", beacon_url: "+beacon+"}\n")
+	}
+	bad := cfg(m.besuOutdated.URL, m.nimbusSynced.URL)
+	good := cfg(m.gethSynced.URL, m.lighthouseSynced.URL)
+	runAt := func(path string, after time.Duration, args ...string) (int, string) {
+		e := testEnv(gh, now.Add(after))
+		e.telegramBaseURL, e.telegramToken = tg.URL, telegramToken
+		var out bytes.Buffer
+		args = append([]string{"-config", path, "-timeout", "2s", "-cache-dir", cache, "-state-file", state}, args...)
+		code := run(context.Background(), args, &out, &out, e)
+		if strings.Contains(out.String(), "AAtelegram") {
+			t.Errorf("output leaks the token:\n%s", out.String())
+		}
+		return code, out.String()
+	}
+	h := time.Hour
+
+	// First run: the CRIT node is reported.
+	code, out := runAt(bad, 0)
+	sent := tg.sent()
+	if code != exitCrit || len(sent) != 1 || !strings.Contains(out, "NOTE  Telegram message sent about a") {
+		t.Fatalf("first run: exit %d, sent %q\n%s", code, sent, out)
+	}
+	for _, want := range []string{
+		"🔴 <b>a</b>: CRIT (was OK)\n",
+		"\n• CRIT execution: Besu dev build of 23.1.1 (&#34;dev&#34;)",
+		"\n• CRIT execution advisories: Besu 23.1.1 is affected by 38 published advisories",
+	} {
+		if !strings.Contains(sent[0], want) {
+			t.Errorf("message lacks %q:\n%s", want, sent[0])
+		}
+	}
+	if tg.paths[0] != "/bot"+telegramToken+"/sendMessage" {
+		t.Errorf("path = %q", tg.paths[0])
+	}
+
+	// Unchanged an hour later: no message.
+	if _, out := runAt(bad, h); len(tg.sent()) != 0 || strings.Contains(out, "Telegram") {
+		t.Errorf("unchanged: sent a message\n%s", out)
+	}
+
+	// -no-notify neither sends nor touches the state; the next run still
+	// sees the change.
+	before := readFile(t, state)
+	if code, _ := runAt(good, 2*h, "-no-notify"); code != exitOK || len(tg.sent()) != 0 || readFile(t, state) != before {
+		t.Errorf("-no-notify: exit %d or state changed", code)
+	}
+
+	// Back to good, but Telegram rejects the token: the nodes are fine,
+	// the failed notification turns the run yellow.
+	tg.answer(http.StatusUnauthorized, "unauthorized.json")
+	code, out = runAt(good, 3*h)
+	if code != exitWarn || !strings.Contains(out, "WARN  notification failed, will retry on the next run: Telegram: HTTP 401: Unauthorized") ||
+		!strings.Contains(out, "Status: WARN (1 OK, 0 WARN, 0 CRIT)") || len(tg.sent()) != 1 {
+		t.Errorf("Telegram failure: exit %d\n%s", code, out)
+	}
+
+	// Telegram works again: the all-clear is delivered, with the time the
+	// node was first seen OK (the -no-notify run does not count).
+	tg.answer(http.StatusOK, "ok.json")
+	code, out = runAt(good, 4*h)
+	sent = tg.sent()
+	if code != exitOK || len(sent) != 1 || sent[0] != "✅ <b>a</b>: OK (was CRIT, since 2026-11-24 15:00 UTC)" {
+		t.Errorf("all clear: exit %d, sent %q\n%s", code, sent, out)
+	}
+}
+
+func TestRunTelegramSetup(t *testing.T) {
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	tg := newFakeTelegram(t)
+	path := writeConfig(t, "telegram: {chat_id: \"@x3f_alerts\", min_level: crit}\nnodes:\n  - {name: a, execution_url: "+m.gethSynced.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+	run1 := func(token string, args ...string) (int, string) {
+		e := testEnv(gh, now)
+		e.telegramBaseURL, e.telegramToken = tg.URL, token
+		var out bytes.Buffer
+		args = append([]string{"-config", path, "-cache-dir", t.TempDir(), "-state-file", filepath.Join(t.TempDir(), "s.json")}, args...)
+		code := run(context.Background(), args, &out, &out, e)
+		return code, out.String()
+	}
+
+	code, out := run1("")
+	if code != exitUnknown || !strings.Contains(out, "X3F_TELEGRAM_BOT_TOKEN is not set") {
+		t.Errorf("no token: exit %d\n%s", code, out)
+	}
+	if code, out := run1("", "-no-notify"); code != exitOK {
+		t.Errorf("no token, -no-notify: exit %d\n%s", code, out)
+	}
+
+	code, out = run1(telegramToken, "-notify-test")
+	sent := tg.sent()
+	if code != exitOK || out != "Test message sent.\n" || len(sent) != 1 || !strings.Contains(sent[0], "x3f test message") {
+		t.Errorf("-notify-test: exit %d, sent %q\n%s", code, sent, out)
+	}
+
+	tg.answer(http.StatusBadRequest, "chat-not-found.json")
+	code, out = run1(telegramToken, "-notify-test")
+	if code != exitUnknown || out != "x3f: Telegram: HTTP 400: Bad Request: chat not found\n" || len(tg.sent()) != 1 {
+		t.Errorf("-notify-test, wrong chat: exit %d\n%s", code, out)
+	}
+
+	// min_level crit: a WARN node is not worth a message.
+	warnPath := writeConfig(t, "telegram: {chat_id: 1, min_level: crit}\nnodes:\n  - {name: w, execution_url: "+m.gethIndexing.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+	if code, out := run1(telegramToken, "-config", warnPath); code != exitWarn || len(tg.sent()) != 0 {
+		t.Errorf("min_level crit, WARN node: exit %d\n%s", code, out)
+	}
+
+	// An unreadable state file: nothing is sent, the run turns yellow.
+	state := filepath.Join(t.TempDir(), "s.json")
+	if err := os.WriteFile(state, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tg.answer(http.StatusOK, "ok.json")
+	code, out = run1(telegramToken, "-state-file", state)
+	if code != exitWarn || !strings.Contains(out, "WARN  notifications skipped: state file "+state) || len(tg.sent()) != 0 {
+		t.Errorf("bad state file: exit %d\n%s", code, out)
+	}
+}
+
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
