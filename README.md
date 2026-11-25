@@ -28,7 +28,7 @@ sudo install x3f_${VERSION}_linux_amd64/x3f /usr/local/bin/
 x3f -version
 ```
 
-Archives exist for Linux and macOS (`tar.gz`) and Windows (`zip`), each for `amd64` and `arm64`. With the [GitHub CLI](https://cli.github.com) you can also check that an archive was built by this repository's release workflow: `gh attestation verify x3f_${VERSION}_linux_amd64.tar.gz --repo ropslabs/x3f`.
+Archives exist for Linux and macOS (`tar.gz`) and Windows (`zip`), each for `amd64` and `arm64`. With the [GitHub CLI](https://cli.github.com) you can also check that an archive was built by this repository's release workflow: `gh attestation verify x3f_${VERSION}_linux_amd64.tar.gz --repo ropslabs/x3f`. The GitHub CLI needs to be logged in for this (`gh auth login`), even though the repository is public.
 
 The macOS binaries are not signed. If macOS refuses to start x3f, remove the quarantine flag: `xattr -d com.apple.quarantine x3f`.
 

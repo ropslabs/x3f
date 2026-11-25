@@ -218,8 +218,8 @@ func newMocks(t *testing.T) mocks {
 // TestRunReport checks the whole report end to end and makes sure that no
 // part of any endpoint URL and not the GitHub token appear in the output.
 func TestRunReport(t *testing.T) {
-	const key = "apikey0123456789secret"
-	const token = "ghp_secrettoken987654321"
+	const key = "apikey0123456789secret"     // gitleaks:allow (test dummy)
+	const token = "ghp_secrettoken987654321" // gitleaks:allow (test dummy)
 	m := newMocks(t)
 	gh := newFakeGitHub(t)
 
