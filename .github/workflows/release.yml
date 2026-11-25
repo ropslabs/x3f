@@ -1,7 +1,8 @@
 name: Release
 
 # A tag like v0.1.0 builds the release. Tags with a hyphen (v0.2.0-rc.1)
-# become GitHub pre-releases.
+# become GitHub pre-releases. Release notes come from docs/releases/<tag>.md
+# (v0.2.0.md also for v0.2.0-rc.1), followed by GitHub's generated notes.
 on:
   push:
     tags: ["v*"]
@@ -48,6 +49,12 @@ jobs:
           flags=()
           if [[ "$GITHUB_REF_NAME" == *-* ]]; then
             flags+=(--prerelease)
+          fi
+          # ${GITHUB_REF_NAME%%-*} drops everything from the first hyphen:
+          # v0.2.0-rc.1 -> v0.2.0. --notes is put before the generated notes.
+          notes="docs/releases/${GITHUB_REF_NAME%%-*}.md"
+          if [[ -f "$notes" ]]; then
+            flags+=(--notes "$(cat "$notes")")
           fi
           gh release create "$GITHUB_REF_NAME" "${flags[@]}" \
             --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes \

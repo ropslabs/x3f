@@ -72,6 +72,7 @@ scripts/              release build (build-release.sh)
 ## Releases
 
 - Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`: checks, `scripts/build-release.sh` (6 targets, archives, `SHA256SUMS`), GitHub artifact attestations, GitHub release. Tags with a hyphen (`v0.2.0-rc.1`) become pre-releases.
+- Release notes: `docs/releases/vX.Y.Z.md` (also used for its release candidates), written for x3f users, with upgrade notes and known limitations; GitHub's generated notes follow. Bump `VERSION=` in the README install section only right before the final tag, not for a release candidate.
 - Before tagging: CI green on main, `forks.yaml` checked against the official sources (see below).
 - Actions are pinned to commit SHAs; update them together with the version comment.
 

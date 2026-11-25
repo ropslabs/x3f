@@ -46,7 +46,10 @@ are resolved.
   Fusaka announcements (2025) list no Ethrex release.
 - On 2026-11-25 the EF blog had no announcement newer than 2026-11-06, and
   the eth-clients `metadata/` directories had no commit newer than the
-  snapshot.
+  snapshot. Checked again before v0.2.0 (2026-11-25 evening): the newer blog
+  posts (Devcon 8 recap, PQAI #0 and #1) announce no fork, the eth-clients
+  `config.yaml` and genesis `config` sections are identical to the snapshot,
+  and the ethereum/pm issues since 2026-11-06 are call agendas only.
 
 The release tables were read from the original page text, not from a
 summary: an automated summary of the postponement post misreported the
