@@ -89,6 +89,35 @@ All links are permalinks to the release tag's commit, checked on 2026-11-24.
   which inserts an optional identity segment after `besu/`
   ([BesuVersionUtils.java L116-L118](https://github.com/besu-eth/besu/blob/09b9e94dd585f2dc7174adcdeeac96590c0becd0/util/src/main/java/org/hyperledger/besu/util/BesuVersionUtils.java#L116-L118)).
 
+### ethrex.json — derived
+
+`ethrex/v31.0.0-HEAD-2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/x86_64-unknown-linux-gnu/rustc-v1.93.0`
+
+- Format `{name}/v{version}-{channel}-{commit}/{os_arch}/rustc-v{rustc}`:
+  [crates/networking/rpc/rpc.rs L369-L372](https://github.com/lambdaclass/ethrex/blob/2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/crates/networking/rpc/rpc.rs#L369-L372),
+  returned by `web3_clientVersion`
+  ([rpc.rs L1975](https://github.com/lambdaclass/ethrex/blob/2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/crates/networking/rpc/rpc.rs#L1975));
+  fields from
+  [cmd/ethrex/utils.rs L219-L228](https://github.com/lambdaclass/ethrex/blob/2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/cmd/ethrex/utils.rs#L219-L228).
+  The commit is the **full** SHA.
+- Channel ([utils.rs L206-L216](https://github.com/lambdaclass/ethrex/blob/2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/cmd/ethrex/utils.rs#L206-L216),
+  [.github/actions/build-docker/image-meta.sh](https://github.com/lambdaclass/ethrex/blob/2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/.github/actions/build-docker/image-meta.sh)):
+  `stable` for the promoted release image, `rc.N` for release candidate
+  tag builds, `release` for a final tag image build, otherwise the git
+  branch. The release binaries are built with plain `cargo build` on a tag
+  checkout ([tag_release.yaml L125-L128](https://github.com/lambdaclass/ethrex/blob/2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/.github/workflows/tag_release.yaml#L125-L128));
+  on a detached HEAD, vergen-git2 9.1.0 (version from Ethrex's
+  `Cargo.lock`) sets the branch to `HEAD`
+  (`add_branch_name` in `src/git2/mod.rs` of the
+  [vergen-git2 9.1.0 crate](https://crates.io/crates/vergen-git2/9.1.0)).
+  So `HEAD`, `stable` and `release` count as releases; any other channel
+  except `rc.N` is a branch, i.e. a dev build.
+- Filled in: version `31.0.0` and commit `2f0bfb20…` of tag v31.0.0, target
+  `x86_64-unknown-linux-gnu` (`ubuntu-22.04` x86_64 build in tag_release.yaml),
+  rustc `1.93.0` from `rust-toolchain.toml` at the tag.
+- Known limitation: a branch name containing `/` (e.g. `release/v32.0.0`)
+  splits the version segment (see `TestParseClientVersionKnownLimitations`).
+
 ### error-method-not-found.json — derived
 
 `{"code":-32601,"message":"the method web3_clientVersion does not exist/is not available"}`

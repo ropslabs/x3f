@@ -959,3 +959,32 @@ func TestRunForksFileErrorsAndStaleness(t *testing.T) {
 		t.Errorf("stale data: exit %d\n%s", code, out)
 	}
 }
+
+// Ethrex end to end: version parsing, release lookup in lambdaclass/ethrex
+// and the fork check with the node's own answer.
+func TestRunEthrex(t *testing.T) {
+	gh := newFakeGitHub(t)
+	m := newMocks(t)
+	ethrex := mockClient(t, map[string][]byte{
+		"web3_clientVersion": fixture(t, "execution/ethrex.json"), // release binary of v31.0.0
+		"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+		"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
+		"eth_config":         fixture(t, "execution/live/eth-config-publicnode-mainnet.json"),
+	})
+	path := writeConfig(t, "nodes:\n  - {name: n, execution_url: "+ethrex.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+	var out bytes.Buffer
+	code := run(context.Background(), []string{"-config", path, "-cache-dir", t.TempDir()}, &out, &out, testEnv(gh, now))
+	got := out.String()
+	if code != exitOK {
+		t.Errorf("exit %d, want %d\n%s", code, exitOK, got)
+	}
+	want := []string{"OK", "n", "mainnet", "Ethrex 31.0.0 (HEAD)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled"}
+	if cells := rowCells(t, got, "n"); !slices.Equal(cells, want) {
+		t.Errorf("row:\n got  %q\n want %q", cells, want)
+	}
+	gh.mu.Lock()
+	defer gh.mu.Unlock()
+	if gh.requests["/repos/lambdaclass/ethrex/releases"] != 1 {
+		t.Errorf("GitHub requests = %v", gh.requests)
+	}
+}

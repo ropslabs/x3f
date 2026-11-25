@@ -21,6 +21,7 @@ const (
 	Nethermind ClientName = "nethermind"
 	Erigon     ClientName = "erigon"
 	Besu       ClientName = "besu"
+	Ethrex     ClientName = "ethrex"
 
 	// Consensus clients.
 	Lighthouse ClientName = "lighthouse"
@@ -38,6 +39,7 @@ var displayNames = map[ClientName]string{
 	Nethermind: "Nethermind",
 	Erigon:     "Erigon",
 	Besu:       "Besu",
+	Ethrex:     "Ethrex",
 	Lighthouse: "Lighthouse",
 	Prysm:      "Prysm",
 	Teku:       "Teku",

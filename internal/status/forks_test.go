@@ -71,6 +71,19 @@ func TestAssessForksBuiltInSchedule(t *testing.T) {
 			wantMsgs: []string{"Geth 1.17.9 still contains the postponed Glamsterdam schedule (2026-10-26 17:42 UTC); update to 1.17.10 or later; the former activation time has passed"},
 		},
 		{
+			// Ethrex is listed from the 2026 announcements on.
+			name: "sepolia, ethrex below the Glamsterdam minimum", chain: sepolia,
+			el: cv("ethrex/v29.0.0-HEAD-0123456789abcdef0123456789abcdef01234567/x86_64-unknown-linux-gnu/rustc-v1.93.0"), cl: lighthouse,
+			wantLevel: Crit, wantCell: "EL below Glamsterdam minimum",
+			wantMsgs: []string{"Ethrex 29.0.0 is older than the minimum release for Glamsterdam (29.0.1): it cannot follow sepolia"},
+		},
+		{
+			name: "hoodi, ethrex with the postponed schedule", chain: hoodi,
+			el: cv("ethrex/v30.0.0-stable-0123456789abcdef0123456789abcdef01234567/x86_64-unknown-linux-gnu/rustc-v1.93.0"), cl: cv("Lodestar/v1.51.0/7923280"),
+			wantLevel: Crit, wantCell: "EL has old Glamsterdam schedule",
+			wantMsgs: []string{"Ethrex 30.0.0 still contains the postponed Glamsterdam schedule (2026-10-26 17:42 UTC); update to 30.0.1 or later"},
+		},
+		{
 			name: "hoodi, geth before the schedule was added", chain: hoodi,
 			el: cv("Geth/v1.17.8-stable-aaaaaaaa/linux-amd64/go1.27.3"), cl: cv("Lodestar/v1.51.0/7923280"),
 			wantLevel: OK, wantCell: "none scheduled",
@@ -314,6 +327,9 @@ func before(v releases.Version) (releases.Version, bool) {
 	case v.Suffix == "" && v.Minor > 0:
 		v.Minor, v.Patch = v.Minor-1, 99
 		return v, true
+	case v.Suffix == "" && v.Major > 0:
+		v.Major, v.Minor, v.Patch = v.Major-1, 99, 99
+		return v, true
 	case strings.HasPrefix(v.Suffix, "rc."):
 		var n int
 		if _, err := fmt.Sscanf(v.Suffix, "rc.%d", &n); err == nil && n > 0 {
@@ -431,7 +447,7 @@ func TestAssessForksNodeAnswer(t *testing.T) {
 			name: "CL schedules the postponed fork at a new date", chain: hoodi, el: geth, cl: lodestar, elCfg: hoodiEL,
 			clCfg:     clConfig(map[string]uint64{"FULU": 50688, "GLOAS": 150000}, 52480, 54016),
 			wantLevel: Warn, wantCell: "CL schedules unknown fork",
-			wantMsgs: []string{fmt.Sprintf("Lodestar 1.51.0 schedules Gloas at epoch 150000 at %s (in 49 days) that forks.yaml (updated 2026-11-24) does not list: forks.yaml may be outdated",
+			wantMsgs: []string{fmt.Sprintf("Lodestar 1.51.0 schedules Gloas at epoch 150000 at %s (in 49 days) that forks.yaml (updated 2026-11-25) does not list: forks.yaml may be outdated",
 				time.Unix(hoodiEpochTime(150000), 0).UTC().Format("2006-01-02 15:04 UTC"))},
 		},
 		{
@@ -474,7 +490,7 @@ func TestAssessForksNodeAnswer(t *testing.T) {
 			clCfg:     clConfig(map[string]uint64{"FULU": 411392, "GLOAS": ff, "HEZE": 500000}, 412672, 419072, 450000),
 			wantLevel: Crit, wantCell: "EL schedules unknown fork",
 			wantMsgs: []string{
-				"Geth 1.17.10 schedules a fork at 2027-01-03 12:00 UTC (in 40 days) that forks.yaml (updated 2026-11-24) does not list",
+				"Geth 1.17.10 schedules a fork at 2027-01-03 12:00 UTC (in 40 days) that forks.yaml (updated 2026-11-25) does not list",
 				"Lighthouse 8.3.3 schedules Heze at epoch 500000",
 				"Lighthouse 8.3.3 schedules a blob parameter change at epoch 450000 at 2026-05-24 12:00 UTC (already passed)",
 			},

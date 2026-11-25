@@ -22,7 +22,7 @@ func TestEmbeddedScheduleIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := s.Updated.Format(time.DateOnly); got != "2026-11-24" {
+	if got := s.Updated.Format(time.DateOnly); got != "2026-11-25" {
 		t.Errorf("updated = %s", got)
 	}
 
@@ -100,7 +100,7 @@ networks:
 		{"typo in timestamp", "timestamp: 1764798551", "timestamp: 1764798552", "does not match epoch 411392 (want 1764798551)"},
 		{"unknown network", "  mainnet:", "  holesky:", `network "holesky" is not one of`},
 		{"wrong chain id", "chain_id: 1", "chain_id: 2", "chain_id 2, want 1"},
-		{"unknown client", "{geth: 1.16.7}", "{ethrex: 1.0.0}", `unknown client "ethrex"`},
+		{"unknown client", "{geth: 1.16.7}", "{erigonx: 1.0.0}", `unknown client "erigonx"`},
 		{"invalid version", "{geth: 1.16.7}", "{geth: latest}", `invalid version "latest"`},
 		{"missing source", "        sources: [https://blog.ethereum.org/2025/11/06/fusaka-mainnet-announcement]\n", "", "at least one source is required"},
 		{"source not https", "https://blog", "http://blog", "is not an https URL"},

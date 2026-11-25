@@ -49,6 +49,13 @@ func TestClassifySuffix(t *testing.T) {
 		{ethereum.Besu, "hotfix", KindRelease},
 		{ethereum.Nimbus, "stateofus", KindRelease}, // codename, not a marker
 		{ethereum.Nimbus, "rc.1", KindRelease},      // Nimbus suffix is always ignored
+		// Ethrex channels (see internal/ethereum/testdata/SOURCES.md).
+		{ethereum.Ethrex, "HEAD", KindRelease},    // release binary
+		{ethereum.Ethrex, "stable", KindRelease},  // promoted release image
+		{ethereum.Ethrex, "release", KindRelease}, // final tag build
+		{ethereum.Ethrex, "rc.2", KindPreRelease},
+		{ethereum.Ethrex, "main", KindDevBuild}, // any other channel is a branch
+		{ethereum.Ethrex, "fix-snap-sync", KindDevBuild},
 
 		// Pre-release, in all spellings seen in the recorded tags.
 		{ethereum.Lighthouse, "rc.1", KindPreRelease},

@@ -30,7 +30,7 @@ func fixturePath(repo Repo) string {
 
 func TestEveryClientHasRepoAndFixture(t *testing.T) {
 	clients := []ethereum.ClientName{
-		ethereum.Geth, ethereum.Reth, ethereum.Nethermind, ethereum.Erigon, ethereum.Besu,
+		ethereum.Geth, ethereum.Reth, ethereum.Nethermind, ethereum.Erigon, ethereum.Besu, ethereum.Ethrex,
 		ethereum.Lighthouse, ethereum.Prysm, ethereum.Teku, ethereum.Nimbus, ethereum.Lodestar, ethereum.Grandine,
 	}
 	for _, c := range clients {
@@ -62,6 +62,7 @@ func TestLatestStableFromRecordedReleases(t *testing.T) {
 		{ethereum.Nethermind, "2.2.2"}, // 2.3.0-rc is newer but a pre-release
 		{ethereum.Erigon, "3.8.2"},
 		{ethereum.Besu, "26.11.2"},
+		{ethereum.Ethrex, "31.0.0"},    // v32.0.0-rc.2 is newer but a pre-release
 		{ethereum.Lighthouse, "8.3.3"}, // v8.4.0-rc.0 is newer but a pre-release
 		{ethereum.Prysm, "7.3.2"},
 		{ethereum.Teku, "26.10.3"},

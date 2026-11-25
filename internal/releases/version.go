@@ -99,7 +99,27 @@ func ClassifySuffix(client ethereum.ClientName, suffix string) SuffixKind {
 	if client == ethereum.Nimbus {
 		return KindRelease
 	}
+	kind := classifyParts(suffix)
 
+	// Ethrex puts a "channel" between version and commit: "stable"
+	// (promoted release image), "release" (final tag build), "HEAD"
+	// (release binaries, built from a detached tag checkout), "rc.N"
+	// (release candidate) or else the git branch of the build.
+	if client == ethereum.Ethrex {
+		switch strings.ToLower(suffix) {
+		case "", "stable", "release", "head":
+			return KindRelease
+		}
+		if kind == KindPreRelease {
+			return kind
+		}
+		return KindDevBuild
+	}
+	return kind
+}
+
+// classifyParts is the client-independent part of ClassifySuffix.
+func classifyParts(suffix string) SuffixKind {
 	var dev, pre, unknown bool
 	parts := strings.FieldsFunc(strings.ToLower(suffix), func(r rune) bool {
 		return r == '-' || r == '.' || r == '+'

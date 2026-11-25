@@ -37,6 +37,29 @@ func TestParseClientVersion(t *testing.T) {
 			want: ClientVersion{Client: Reth, Version: "2.11.0", Commit: "b9abbcc1"},
 		},
 		{
+			name: "ethrex release binary",
+			raw:  "ethrex/v31.0.0-HEAD-2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/x86_64-unknown-linux-gnu/rustc-v1.93.0",
+			want: ClientVersion{Client: Ethrex, Version: "31.0.0", Suffix: "HEAD", Commit: "2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c"},
+		},
+		{
+			// Same format, channel "stable" from the promoted image.
+			name: "ethrex promoted image",
+			raw:  "ethrex/v31.0.0-stable-2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c/x86_64-unknown-linux-gnu/rustc-v1.93.0",
+			want: ClientVersion{Client: Ethrex, Version: "31.0.0", Suffix: "stable", Commit: "2f0bfb201d4a576ebc6a7396c8e8b1c1763ac50c"},
+		},
+		{
+			// Channel "rc.2" from a release candidate tag build.
+			name: "ethrex release candidate",
+			raw:  "ethrex/v32.0.0-rc.2-0123456789abcdef0123456789abcdef01234567/aarch64-unknown-linux-gnu/rustc-v1.93.0",
+			want: ClientVersion{Client: Ethrex, Version: "32.0.0", Suffix: "rc.2", Commit: "0123456789abcdef0123456789abcdef01234567"},
+		},
+		{
+			// Channel = git branch for other builds.
+			name: "ethrex branch build",
+			raw:  "ethrex/v31.0.0-main-0123456789abcdef0123456789abcdef01234567/x86_64-unknown-linux-gnu/rustc-v1.93.0",
+			want: ClientVersion{Client: Ethrex, Version: "31.0.0", Suffix: "main", Commit: "0123456789abcdef0123456789abcdef01234567"},
+		},
+		{
 			name: "reth literal example with pre-release",
 			raw:  "reth/v0.1.0-alpha.1-428a6dc2f/aarch64-apple-darwin",
 			want: ClientVersion{Client: Reth, Version: "0.1.0", Suffix: "alpha.1", Commit: "428a6dc2f"},
@@ -237,6 +260,16 @@ func TestParseClientVersionKnownLimitations(t *testing.T) {
 			name: "numeric suffix taken as commit",
 			raw:  "Geth/v1.17.11-unstable-20261120/linux-amd64/go1.27.3",
 			want: ClientVersion{Client: Geth, Version: "1.17.11", Suffix: "unstable", Commit: "20261120"},
+		},
+		{
+			// Ethrex puts the git branch into the version segment; a branch
+			// name with "/" splits it ("release/v32.0.0" is a real branch
+			// name in the Ethrex repository). The suffix becomes "release",
+			// which counts as a release, and the commit is lost.
+			// Correct would be: Suffix "release/v32.0.0" (a dev build).
+			name: "ethrex branch name with slash",
+			raw:  "ethrex/v32.0.0-release/v32.0.0-0123456789abcdef0123456789abcdef01234567/x86_64-unknown-linux-gnu/rustc-v1.93.0",
+			want: ClientVersion{Client: Ethrex, Version: "32.0.0", Suffix: "release"},
 		},
 		{
 			// Synthetic: the same happens for any numeric part, e.g. a

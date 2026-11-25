@@ -22,6 +22,10 @@ were answered via redirect from the old path:
 `prerelease`, `draft`, `published_at`). Everything else (author objects, URLs,
 asset lists, changelog bodies) was removed. The files contain **no HTTP
 headers and no tokens**; the requests were made without a token anyway.
+`lambdaclass_ethrex.json` was recorded the same way on 2026-11-25 (all 68
+releases; `v32.0.0-rc.2` and `v32.0.0-rc.1` are flagged pre-releases, the
+latest stable release is `v31.0.0`).
+
 Order and number of releases are unchanged (100 per repository; Grandine has
 only 28 releases in total).
 

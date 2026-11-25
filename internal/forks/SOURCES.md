@@ -1,6 +1,7 @@
 # Sources for forks.yaml
 
-Checked on 2026-11-24. Only official sources are used for the data; the
+Checked on 2026-11-24; Ethrex rows and new announcements checked on
+2026-11-25. Only official sources are used for the data; the
 eth-clients repositories serve as a cross-check (see below).
 
 ## Announcements
@@ -39,7 +40,13 @@ are resolved.
   (2026-10-22), introduced there as "releases incorporating the postponed
   Hoodi activation". The announcement does not say whether releases before
   `scheduled_in` contained the schedule too.
-- Ethrex appears in the 2026 tables but is not supported by x3f yet.
+- Ethrex appears in the 2026 tables only: Sepolia Glamsterdam 29.0.1, Hoodi
+  Glamsterdam `scheduled_in` 30.0.0 and `removed_in` v30.0.1 (written with
+  "v" in the post). The download links point to `lambdaclass/ethrex`. The
+  Fusaka announcements (2025) list no Ethrex release.
+- On 2026-11-25 the EF blog had no announcement newer than 2026-11-06, and
+  the eth-clients `metadata/` directories had no commit newer than the
+  snapshot.
 
 The release tables were read from the original page text, not from a
 summary: an automated summary of the postponement post misreported the

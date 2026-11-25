@@ -17,10 +17,10 @@
 # the releases that contained the old schedule and the first ones that
 # removed it again.
 #
-# Ethrex releases are listed in the announcements but not here yet; x3f does
-# not support Ethrex so far.
+# Ethrex is listed from the 2026 announcements on; the Fusaka announcements
+# (2025) have no Ethrex release.
 
-updated: 2026-11-24
+updated: 2026-11-25
 
 networks:
   mainnet:
@@ -111,6 +111,7 @@ networks:
           nethermind: 2.1.0
           erigon: 3.7.1
           besu: 26.9.0
+          ethrex: 29.0.1
           lighthouse: 8.3.0-rc.0
           # Prysm 7.2.0 also supports the fork but defaults to a 60M gas
           # limit afterwards; the announcement lists 7.2.1.
@@ -164,6 +165,7 @@ networks:
           nethermind: 2.2.0
           erigon: 3.8.0
           besu: 26.10.0
+          ethrex: 30.0.0
           lighthouse: 8.3.1
           prysm: 7.3.0
           teku: 26.10.1
@@ -177,6 +179,7 @@ networks:
           nethermind: 2.2.1
           erigon: 3.8.1
           besu: 26.10.1
+          ethrex: 30.0.1
           lighthouse: 8.3.2
           prysm: 7.3.1
           teku: 26.10.2

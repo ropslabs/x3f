@@ -14,7 +14,7 @@ Goal: for each configured node, report whether its clients are up to date, wheth
 
 1. **Config** (`x3f.yaml`): list of nodes with name, execution client JSON-RPC URL and beacon API URL.
 2. **Collect versions**
-   - Execution client (Geth, Reth, Nethermind, Erigon, Besu): JSON-RPC `web3_clientVersion`
+   - Execution client (Geth, Reth, Nethermind, Erigon, Besu, Ethrex): JSON-RPC `web3_clientVersion`
    - Consensus client (Lighthouse, Prysm, Teku, Nimbus, Lodestar, Grandine): `GET /eth/v1/node/version`
    - Sync status: `eth_syncing` and `GET /eth/v1/node/syncing`
 3. **Compare**

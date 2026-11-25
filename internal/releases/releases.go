@@ -27,6 +27,7 @@ var repos = map[ethereum.ClientName]Repo{
 	ethereum.Nethermind: {"NethermindEth", "nethermind"},
 	ethereum.Erigon:     {"erigontech", "erigon"},
 	ethereum.Besu:       {"besu-eth", "besu"},
+	ethereum.Ethrex:     {"lambdaclass", "ethrex"},
 	ethereum.Lighthouse: {"sigp", "lighthouse"},
 	ethereum.Prysm:      {"OffchainLabs", "prysm"},
 	ethereum.Teku:       {"Consensys-Incorporated", "teku"},
