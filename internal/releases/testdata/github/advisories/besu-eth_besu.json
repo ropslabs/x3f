@@ -1,0 +1,838 @@
+[
+  {
+    "ghsa_id": "GHSA-2vfg-f2fr-2jrv",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-2vfg-f2fr-2jrv",
+    "summary": "IBFT/QBFT: a consensus message whose signature does not recover throws NullPointerException, and on IBFT can drop buffered consensus messages",
+    "severity": "low",
+    "published_at": "2026-11-18T05:22:53Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.10.2",
+        "patched_versions": "26.11.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-mp5j-q856-vvx7",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-mp5j-q856-vvx7",
+    "summary": "Malformed peer receipts poison Besu's synced receipt store and break historical transaction/event queries",
+    "severity": "medium",
+    "published_at": "2026-11-18T05:22:33Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.10.2",
+        "patched_versions": "26.11.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-m886-r6ch-pjvr",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-m886-r6ch-pjvr",
+    "summary": "QBFT/IBFT2 message decode performs unbounded eager signature recovery before the validator check, letting any peer stall the consensus thread (DoS)",
+    "severity": "high",
+    "published_at": "2026-10-13T02:15:58Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.8.0",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-4h4f-925g-8h9p",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-4h4f-925g-8h9p",
+    "summary": "EIP-7702 and sender signature recovery skips the secp256k1 curve-order bound, so native and BouncyCastle backends recover different authorities (consensus split)",
+    "severity": "high",
+    "published_at": "2026-10-14T00:13:39Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-cgvq-9xfq-c54j",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-cgvq-9xfq-c54j",
+    "summary": "Besu accepts RLP-wrapped typed transactions in ExecutionPayload block bodies, causing a client-line consensus split",
+    "severity": "medium",
+    "published_at": "2026-10-14T00:14:20Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-x2jm-6mc4-8g78",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-x2jm-6mc4-8g78",
+    "summary": "QBFT/IBFT validator forgets its prepared certificate when the round advances by any route other than its own timer, weakening the quorum-intersection argument",
+    "severity": "medium",
+    "published_at": "2026-10-29T02:02:00Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.9.0",
+        "patched_versions": "26.10.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-hhgq-3gvc-4jhp",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-hhgq-3gvc-4jhp",
+    "summary": "QBFT RoundChange executes the piggybacked block before the free hash check, letting a non-validator replay one captured signature with substituted blocks",
+    "severity": "medium",
+    "published_at": "2026-11-10T04:40:09Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.10.1",
+        "patched_versions": "26.10.2"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-6pcq-hcgg-5q76",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-6pcq-hcgg-5q76",
+    "summary": "IBFT Accepts Oversized Base Fees That Can Stop Block Production",
+    "severity": "medium",
+    "published_at": "2026-11-10T04:40:47Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.10.1",
+        "patched_versions": "26.10.2"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-pvgm-f647-f7vc",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-pvgm-f647-f7vc",
+    "summary": "Uncaught NullPointerException in IBFT 2.0/QBFT commit seal validation via crafted commit seal",
+    "severity": "low",
+    "published_at": "2026-11-18T05:21:38Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.10.2",
+        "patched_versions": "26.11.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-4c5c-6mr5-vxrh",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-4c5c-6mr5-vxrh",
+    "summary": "Uncaught NullPointerException in Clique header validation via crafted proposer seal",
+    "severity": "low",
+    "published_at": "2026-11-18T05:22:05Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.10.2",
+        "patched_versions": "26.11.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-qfmh-cxw4-9h66",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-qfmh-cxw4-9h66",
+    "summary": "debug_traceTransaction and trace_* RPC methods missing server-side EVM step cap — incomplete fix for GHSA-4776-8c3f-fx7g",
+    "severity": "medium",
+    "published_at": "2026-10-07T23:15:24Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.8.1",
+        "patched_versions": "26.9.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-g5j7-4r2x-rx9j",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-g5j7-4r2x-rx9j",
+    "summary": "A permissionless non-validator peer can halt QBFT finality through pre-authorization proposal decoding",
+    "severity": "high",
+    "published_at": "2026-10-08T04:08:37Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.8.1",
+        "patched_versions": "26.9.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-8j3g-67qm-7rqp",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-8j3g-67qm-7rqp",
+    "summary": "snap-sync isValidRangeProof accepts a non-empty range as empty when the full subtrie is supplied as proof",
+    "severity": "medium",
+    "published_at": "2026-10-07T23:14:43Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.8.1",
+        "patched_versions": "26.9.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-p4h2-gvh4-pv6j",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-p4h2-gvh4-pv6j",
+    "summary": "Shanghai-enabled QBFT lets one Byzantine validator mint native currency through unvalidated withdrawals",
+    "severity": "high",
+    "published_at": "2026-09-26T14:17:29Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": ">= 24.5.2",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-jxwx-rxf9-pg2g",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-jxwx-rxf9-pg2g",
+    "summary": "JWT algorithm confusion allows token forgery when HMAC algorithm is used with a public key file",
+    "severity": "high",
+    "published_at": "2026-09-26T14:17:33Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "< 26.8.1",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-f429-4669-7rpx",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-f429-4669-7rpx",
+    "summary": "Engine API JWT secret exposed in application logs when ephemeral key file cannot be written",
+    "severity": "high",
+    "published_at": "2026-09-26T14:17:30Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "< 26.8.1",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-hmg2-5mmq-gv7c",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-hmg2-5mmq-gv7c",
+    "summary": "EIP-7825 per-block transaction gas cap compared as signed long — gas=2^63 transactions bypass pool validation and gossip to peers",
+    "severity": "medium",
+    "published_at": "2026-09-26T14:17:32Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": ">= 25.7.0, < 26.8.1",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-g499-x5x3-8gjj",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-g499-x5x3-8gjj",
+    "summary": "GraphQL logs(filter) accepts an unbounded block range (sibling of GHSA-8g2r-qvch-4c9j)",
+    "severity": "low",
+    "published_at": "2026-09-26T14:17:31Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.8.0",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-p6f8-q9mp-7mj9",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-p6f8-q9mp-7mj9",
+    "summary": "Log filter and subscription address lists are unbounded and matched linearly on the block-import thread, allowing unauthenticated callers to stall block production",
+    "severity": "high",
+    "published_at": "2026-09-26T14:17:30Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "< 26.8.1",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-xw6x-9526-6w9r",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-xw6x-9526-6w9r",
+    "summary": "Besu's DiscV4 UDP discovery remote DoS",
+    "severity": "high",
+    "published_at": "2026-10-02T02:17:19Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-xg9p-226c-vxvw",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-xg9p-226c-vxvw",
+    "summary": "Bonsai parallel block processor retains transaction futures after block rejection, causing unbounded memory growth and node outage",
+    "severity": "high",
+    "published_at": "2026-10-02T05:57:01Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-rw6m-h55m-hggm",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-rw6m-h55m-hggm",
+    "summary": "Besu's transaction pool has no per-transaction encoded-size cap, causing peer clients to penalize or disconnect nodes that relay oversized transactions",
+    "severity": "medium",
+    "published_at": "2026-10-02T02:37:04Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.8.0",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-6r9q-wjp4-34gh",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-6r9q-wjp4-34gh",
+    "summary": "Pre-STATUS RLPx connections are excluded from --max-peers accounting, letting a peer hold unbounded connections via distinct node identities",
+    "severity": "medium",
+    "published_at": "2026-10-02T02:23:09Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-8g2r-qvch-4c9j",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-8g2r-qvch-4c9j",
+    "summary": "GraphQL blocks(from, to) range query has no cap on range span or clamp to the chain head, letting a single client exhaust request-handling capacity",
+    "severity": "medium",
+    "published_at": "2026-10-02T02:29:16Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-pcv4-pxhv-99m7",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-pcv4-pxhv-99m7",
+    "summary": "Besu nodes with the snap server enabled schedule an unbounded native thread per inbound snap/1 GET request, letting a single peer exhaust thread capacity",
+    "severity": "medium",
+    "published_at": "2026-10-02T02:21:56Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-h552-3fxr-chmx",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-h552-3fxr-chmx",
+    "summary": "Snap-sync storage-range count amplification: a tiny returned slot hash yields an unbounded child-range count, leading to OOM or sync-worker crash",
+    "severity": "low",
+    "published_at": "2026-10-02T03:50:57Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.8.0",
+        "patched_versions": "26.8.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-qhrf-865g-38rh",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-qhrf-865g-38rh",
+    "summary": "FutureMessageBuffer bounds buffered future-height BFT messages only by count, not by byte size, allowing memory exhaustion via oversized proposals",
+    "severity": "medium",
+    "published_at": "2026-08-14T09:58:23Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-j2cm-8hc2-6975",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-j2cm-8hc2-6975",
+    "summary": "MainnetTransactionProcessor applies SELFDESTRUCT markers from the initial frame even when the transaction fails, leaking account deletion past EIP-6780 semantics",
+    "severity": "high",
+    "published_at": "2026-08-14T09:56:11Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-65m7-wvhv-9gch",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-65m7-wvhv-9gch",
+    "summary": "AbstractPrecompiledContract's shared result cache keys entries by a 32-bit Arrays.hashCode(), allowing an attacker to force cache-entry collisions between distinct inputs",
+    "severity": "low",
+    "published_at": "2026-08-14T09:50:49Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-m2pj-j62h-7jwm",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-m2pj-j62h-7jwm",
+    "summary": "Per-transaction O(N^2) HashDoS via hash-bucket collisions in EVM warm-access and EIP-1153 transient-storage tracking",
+    "severity": "high",
+    "published_at": "2026-08-14T10:01:38Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-ffqr-pj4h-xq37",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-ffqr-pj4h-xq37",
+    "summary": "eth_subscribe over WebSocket allows unbounded subscription creation, growing SubscriptionManager's in-memory state without limit",
+    "severity": "medium",
+    "published_at": "2026-08-14T10:04:00Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-j2j5-x2rr-cv75",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-j2j5-x2rr-cv75",
+    "summary": "A single devp2p peer can drive unbounded block-fetch work via repeated NEW_BLOCK_HASHES/NEW_BLOCK announcements for the same block number",
+    "severity": "high",
+    "published_at": "2026-08-14T10:05:53Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-mqqm-3pp2-ff8j",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-mqqm-3pp2-ff8j",
+    "summary": "Missing requestsHash presence check allows a post-Prague block header to omit the EIP-7685 requestsHash field",
+    "severity": "medium",
+    "published_at": "2026-08-14T10:08:25Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-h594-ww62-rcxv",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-h594-ww62-rcxv",
+    "summary": "Pre-authentication discovery-packet handling flaw allows remote unauthenticated log-amplification denial of service (discv4 UDP).",
+    "severity": "medium",
+    "published_at": "2026-10-02T03:52:10Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-4776-8c3f-fx7g",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-4776-8c3f-fx7g",
+    "summary": "Besu ≤26.7.0 — operator-reachable DoS via debug_traceCall (OOM → consensus drop)",
+    "severity": "medium",
+    "published_at": "2026-10-02T02:26:16Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-pr92-c4mc-x48r",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-pr92-c4mc-x48r",
+    "summary": "`P256VerifyPrecompiledContract.computePrecompile` (the EIP-7951 precompile that becomes mainnet-active in Osaka) writes to `System.err` directly via `System.err.println(...)` in its catch-all error handler. The handler runs on the EVM transaction-pro",
+    "severity": "medium",
+    "published_at": "2026-10-02T03:51:25Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-vff7-xxjc-rccp",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-vff7-xxjc-rccp",
+    "summary": "`FilterRepository` stores all installed log/block/pending-tx filters in an unbounded `ConcurrentHashMap`",
+    "severity": "medium",
+    "published_at": "2026-08-14T10:10:15Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "< 26.7.1",
+        "patched_versions": "26.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-pmrq-5v5f-x6mf",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-pmrq-5v5f-x6mf",
+    "summary": "`CodeDelegationTransactionDecoder.decodeInnerPayload` reads the per-authorisation `chainId` as an unbounded `BigInteger`, but `MainnetTransactionValidator.validateTransactionType` enforces `chainId < 2^256` by **throwing an unchecked `IllegalArgument",
+    "severity": "high",
+    "published_at": "2026-08-10T21:59:30Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu/besu"
+        },
+        "vulnerable_version_range": "<= 26.6.0",
+        "patched_versions": "26.6.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-23rh-rrqg-wq82",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-23rh-rrqg-wq82",
+    "summary": "`QbftRoundChangeManager.roundChangeCache` is keyed by `ConsensusRoundIdentifier` (sequence + round number) and `RoundChangePayloadValidator` only requires `targetRound > 0` — there is no upper bound. A single misbehaving validator can flood `RoundC",
+    "severity": "medium",
+    "published_at": "2026-10-02T02:18:13Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-9w9r-w3rf-j6vj",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-9w9r-w3rf-j6vj",
+    "summary": "`eth_getLogs` enforces an `--rpc-max-logs-range` block-range cap, but the same protection is missing from the filter-based path. An unauthenticated caller can install a filter via `eth_newFilter` with `fromBlock: \"0x0\", toBlock: \"latest\"`, then poll ",
+    "severity": "high",
+    "published_at": "2026-10-02T02:24:04Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:besu"
+        },
+        "vulnerable_version_range": "<= 26.7.1",
+        "patched_versions": "26.8.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-v5gq-r843-8f73",
+    "cve_id": null,
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-v5gq-r843-8f73",
+    "summary": "SEC-50 RLPx AES CTR keystream reusage #1315. (Case for private network)",
+    "severity": "medium",
+    "published_at": "2026-08-10T22:00:17Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "rlpx"
+        },
+        "vulnerable_version_range": "all",
+        "patched_versions": ""
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-4456-w38r-m53x",
+    "cve_id": "CVE-2022-36025",
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-4456-w38r-m53x",
+    "summary": "Gas allocation error in CALL operations in Besu EVM",
+    "severity": "critical",
+    "published_at": "2022-09-23T17:39:38Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "org.hyperledger.besu:evm"
+        },
+        "vulnerable_version_range": "22.4.0-RC2,22.4.0,22.4.1,22.4.2,22.4.3,22.4.4,22.7.0,22.7.0-RC1,22.7.0-RC2,22.7.0-RC3,22.7.0-RC4",
+        "patched_versions": "22.7.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-7pg2-p5vj-xp5h",
+    "cve_id": "CVE-2021-41272",
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-7pg2-p5vj-xp5h",
+    "summary": "SHL, SHR, and SAR operations trigger native exception at key values",
+    "severity": "high",
+    "published_at": "2021-12-10T20:42:54Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "java",
+          "name": "org.hyperledger.besu:evm"
+        },
+        "vulnerable_version_range": "21.10.0,21.10.1",
+        "patched_versions": "21.10.2"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-qgfj-mjpc-7w3q",
+    "cve_id": "CVE-2021-21369",
+    "html_url": "https://github.com/besu-eth/besu/security/advisories/GHSA-qgfj-mjpc-7w3q",
+    "summary": "Potential DoS in Besu HTTP JSON-RPC API",
+    "severity": "low",
+    "published_at": "2021-01-21T15:43:19Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "besu",
+          "name": ""
+        },
+        "vulnerable_version_range": "<= 1.5.0",
+        "patched_versions": "1.5.0"
+      }
+    ]
+  }
+]

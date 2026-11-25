@@ -1,0 +1,154 @@
+[
+  {
+    "ghsa_id": "GHSA-8rp4-6f4x-5j4p",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-8rp4-6f4x-5j4p",
+    "summary": "Memory leak when peer disconnects after sending RPC requests",
+    "severity": "medium",
+    "published_at": "2026-10-26T03:13:02Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<8.3.0",
+        "patched_versions": ">=8.3.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-22w9-383x-536m",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-22w9-383x-536m",
+    "summary": "Proposer slashing for an exited validator causes failed block proposals",
+    "severity": "medium",
+    "published_at": "2026-10-26T03:13:40Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<8.3.0",
+        "patched_versions": ">=8.3.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-rvxr-393q-q925",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-rvxr-393q-q925",
+    "summary": "Memory exhaustion when serving data column requests",
+    "severity": "high",
+    "published_at": "2026-10-26T03:13:56Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<8.3.0",
+        "patched_versions": ">=8.3.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-v572-mgjq-2m7h",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-v572-mgjq-2m7h",
+    "summary": "`/eth/v1/builder/blinded_blocks` endpoint accepts Fulu blob data without verifying it",
+    "severity": "low",
+    "published_at": "2026-10-26T03:14:13Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<8.3.0",
+        "patched_versions": ">=8.3.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-92p8-xfr4-4955",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-92p8-xfr4-4955",
+    "summary": "Crafted attestations can OOM a Lighthouse beacon node running the slasher",
+    "severity": "medium",
+    "published_at": "2026-10-15T04:55:23Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<8.2.0",
+        "patched_versions": ">=8.2.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-3fm2-7wx2-vp46",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-3fm2-7wx2-vp46",
+    "summary": "Historical block requests can cause missed validator duties",
+    "severity": "medium",
+    "published_at": "2026-10-15T04:55:06Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<8.2.1",
+        "patched_versions": ">=8.2.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-v927-8q6p-vjx2",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-v927-8q6p-vjx2",
+    "summary": "Fork choice promotes stale checkpoints after slashings",
+    "severity": "low",
+    "published_at": "2026-10-15T04:54:53Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<8.2.0",
+        "patched_versions": ">= 8.2.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-wm9c-xvqq-5c28",
+    "cve_id": null,
+    "html_url": "https://github.com/sigp/lighthouse/security/advisories/GHSA-wm9c-xvqq-5c28",
+    "summary": "Incorrect processing of effective balances in Electra epoch processing",
+    "severity": "high",
+    "published_at": "2025-04-01T01:59:22Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": "Lighthouse"
+        },
+        "vulnerable_version_range": "< v7.0.0-beta.5",
+        "patched_versions": "v7.0.0-beta.5"
+      }
+    ]
+  }
+]

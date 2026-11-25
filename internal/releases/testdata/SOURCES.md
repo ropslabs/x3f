@@ -41,3 +41,49 @@ Cases in this data that the tests rely on:
   `-hotfix`, `-mekong`, `-exp`, `-tree.1`
 - newer pre-releases than the latest stable release:
   `lighthouse v8.4.0-rc.0`, `nethermind 2.3.0-rc`, `grandine 3.0.0-rc.4`
+
+## github/advisories/*.json — recorded
+
+Recorded from the GitHub REST API on 2026-11-25 with
+
+```
+GET https://api.github.com/repos/{owner}/{repo}/security-advisories?state=published&per_page=100
+```
+
+("List repository security advisories"), without authentication, for all 12
+client repositories (same file names as above). Every list fit into one page.
+
+**Trimmed:** each advisory keeps only `ghsa_id`, `cve_id`, `html_url`,
+`summary`, `severity`, `published_at`, `withdrawn_at` and, per entry of
+`vulnerabilities`, `package`, `vulnerable_version_range` and
+`patched_versions`. Descriptions, CVSS data, credits and author objects were
+removed. Order and number of advisories are unchanged. The files contain **no
+HTTP headers and no tokens**.
+
+| Repository | Advisories |
+|---|---|
+| besu-eth/besu | 44 |
+| ethereum/go-ethereum | 17 |
+| sigp/lighthouse | 8 |
+| ChainSafe/lodestar | 3 |
+| Consensys-Incorporated/teku | 1 |
+| erigontech/erigon | 1 |
+| paradigmxyz/reth, NethermindEth/nethermind, lambdaclass/ethrex, OffchainLabs/prysm, status-im/nimbus-eth2, grandinetech/grandine | 0 (`[]`) |
+
+Range spellings in this data that the parser relies on (all real):
+
+- comparators with and without space and `v`: `< 1.13.15`, `<0.35.0`,
+  `<= 26.10.2`, `>= v1.9.4, < 1.9.20`, `< v7.0.0-beta.5`
+- conjunction with `and` and a double space: `>=v3.1.0 and  <v3.4.0` (Erigon)
+- explicit version lists: `21.10.0,21.10.1`,
+  `22.4.0-RC2,22.4.0,…,22.7.0-RC4` (Besu)
+- a lower bound only, the fix in `patched_versions`: `>= 24.5.2` / `26.8.1`
+  (Besu GHSA-p4h2-gvh4-pv6j)
+- `all` with an empty `patched_versions` (Besu GHSA-v5gq-r843-8f73)
+- patched spellings: `26.8.1`, `>= 1.16.9`, `>=8.3.0`, `>= v1.9.18`,
+  `v7.0.0-beta.5`, `v3.4.0`
+- severities: `critical`, `high`, `medium`, `low`; `cve_id` often `null`
+
+The pagination tests split `besu-eth_besu.json` into pages and add a `Link`
+header in the format the GitHub docs show ("Using pagination in the REST
+API"); GitHub did not paginate any of these lists itself.

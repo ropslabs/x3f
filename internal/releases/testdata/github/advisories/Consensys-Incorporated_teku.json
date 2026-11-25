@@ -1,0 +1,21 @@
+[
+  {
+    "ghsa_id": "GHSA-mwfw-vm54-g3p7",
+    "cve_id": "CVE-2021-44228",
+    "html_url": "https://github.com/Consensys-Incorporated/teku/security/advisories/GHSA-mwfw-vm54-g3p7",
+    "summary": "Potential remote code exploit in log4j dependency",
+    "severity": "critical",
+    "published_at": "2021-12-10T05:16:27Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "maven",
+          "name": "tech.pegasys.teku"
+        },
+        "vulnerable_version_range": "<21.12.1",
+        "patched_versions": "21.12.1"
+      }
+    ]
+  }
+]

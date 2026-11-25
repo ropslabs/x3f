@@ -1,0 +1,59 @@
+[
+  {
+    "ghsa_id": "GHSA-m9c9-mc2h-9wjw",
+    "cve_id": null,
+    "html_url": "https://github.com/ChainSafe/lodestar/security/advisories/GHSA-m9c9-mc2h-9wjw",
+    "summary": "Lodestar snappy checksum issue",
+    "severity": "low",
+    "published_at": "2025-01-14T20:12:41Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": "@lodestar/reqresp"
+        },
+        "vulnerable_version_range": "< 1.24.0",
+        "patched_versions": "1.25.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-53rv-hcvm-rpp9",
+    "cve_id": null,
+    "html_url": "https://github.com/ChainSafe/lodestar/security/advisories/GHSA-53rv-hcvm-rpp9",
+    "summary": "Lodestar snappy decompression issue",
+    "severity": "low",
+    "published_at": "2025-01-14T20:12:23Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": "@lodestar/reqresp"
+        },
+        "vulnerable_version_range": "< 1.24.0",
+        "patched_versions": "1.25.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-cvj7-5f3c-9vg9",
+    "cve_id": "CVE-2022-29219",
+    "html_url": "https://github.com/ChainSafe/lodestar/security/advisories/GHSA-cvj7-5f3c-9vg9",
+    "summary": "AttesterSlashing number overflow",
+    "severity": "medium",
+    "published_at": "2022-05-12T16:30:38Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "npm",
+          "name": "@chainsafe/lodestar"
+        },
+        "vulnerable_version_range": "<0.35.0",
+        "patched_versions": "0.36.0"
+      }
+    ]
+  }
+]

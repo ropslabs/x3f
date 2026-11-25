@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
@@ -17,16 +19,17 @@ import (
 const (
 	// DefaultBaseURL is the GitHub REST API.
 	DefaultBaseURL = "https://api.github.com"
-	// maxBodyBytes limits the releases response. 100 releases including
+	// maxBodyBytes limits each response page. 100 releases including
 	// their changelogs are a few MB; the limit guards against surprises.
 	maxBodyBytes = 32 << 20
 )
 
-// Source fetches releases from GitHub and caches them on disk.
+// Source fetches releases and security advisories from GitHub and caches
+// them on disk.
 //
-// The cache file per repository holds only the ETag, the time of the last
-// successful fetch and the reduced release list; never request or response
-// headers and never the token.
+// The cache file per repository and list holds only the ETag, the time of
+// the last successful fetch and the reduced list; never request or
+// response headers and never the token.
 type Source struct {
 	// HTTP is the client for GitHub requests; nil means a default client.
 	HTTP *http.Client
@@ -59,12 +62,48 @@ type Result struct {
 	Cached bool
 }
 
-// cacheEntry is the on-disk format.
-type cacheEntry struct {
+// list describes one kind of per-repository list that x3f fetches.
+type list struct {
+	// kind names the list in errors and marks its cache files.
+	kind string
+	// path is appended to /repos/{owner}/{repo}/.
+	path string
+	// file is appended to the repository name to form the cache file name.
+	file string
+	// maxPages is how many pages are fetched by following the Link
+	// header. Releases need only the newest page.
+	maxPages int
+}
+
+var (
+	releasesList = list{
+		kind: "releases", path: "releases?per_page=100",
+		file: ".json", maxPages: 1,
+	}
+	advisoriesList = list{
+		kind: "security advisories", path: "security-advisories?state=published&per_page=100",
+		file: ".advisories.json", maxPages: 10,
+	}
+)
+
+// listResult is the outcome of getList; Result and AdvisoryResult are
+// built from it.
+type listResult[T any] struct {
+	Items      []T
+	FetchedAt  time.Time
+	RefreshErr error
+	Cached     bool
+}
+
+// cacheEntry is the on-disk format. Kind guards against reading one list as
+// another, and makes cache files from x3f v0.1.0 (which had no kind) count
+// as missing: they are simply fetched again.
+type cacheEntry[T any] struct {
 	Repo      string    `json:"repo"`
+	Kind      string    `json:"kind"`
 	ETag      string    `json:"etag,omitempty"`
 	FetchedAt time.Time `json:"fetched_at"`
-	Releases  []Release `json:"releases"`
+	Items     []T       `json:"items"`
 }
 
 // Releases returns the releases of repo, from the cache if it is fresh,
@@ -72,7 +111,8 @@ type cacheEntry struct {
 // data is returned with RefreshErr set. An error is returned only if there
 // is no data at all.
 func (s *Source) Releases(ctx context.Context, repo Repo) (Result, error) {
-	return s.get(ctx, repo, false)
+	r, err := getList[Release](ctx, s, repo, releasesList, false)
+	return releaseResult(r), err
 }
 
 // Refresh is like Releases but ignores the TTL and always asks GitHub (with
@@ -80,47 +120,95 @@ func (s *Source) Releases(ctx context.Context, repo Repo) (Result, error) {
 // cached data looks outdated, e.g. a node runs a version newer than every
 // cached release.
 func (s *Source) Refresh(ctx context.Context, repo Repo) (Result, error) {
-	return s.get(ctx, repo, true)
+	r, err := getList[Release](ctx, s, repo, releasesList, true)
+	return releaseResult(r), err
 }
 
-func (s *Source) get(ctx context.Context, repo Repo, force bool) (Result, error) {
+func releaseResult(r listResult[Release]) Result {
+	return Result{Releases: r.Items, FetchedAt: r.FetchedAt, RefreshErr: r.RefreshErr, Cached: r.Cached}
+}
+
+// getList is a generic function: T is Release or Advisory. Go methods
+// cannot have type parameters of their own, so this is a plain function
+// that takes the Source as an argument.
+func getList[T any](ctx context.Context, s *Source, repo Repo, l list, force bool) (listResult[T], error) {
 	now := s.now()
-	cached, haveCache := s.readCache(repo)
+	cached, haveCache := readCache[T](s, repo, l)
 	if haveCache && !force && now.Sub(cached.FetchedAt) < s.TTL {
-		return Result{Releases: cached.Releases, FetchedAt: cached.FetchedAt, Cached: true}, nil
+		return listResult[T]{Items: cached.Items, FetchedAt: cached.FetchedAt, Cached: true}, nil
 	}
 
 	etag := ""
 	if haveCache {
 		etag = cached.ETag
 	}
-	fresh, notModified, newETag, err := s.fetch(ctx, repo, etag)
+	fresh, notModified, newETag, err := fetchList[T](ctx, s, repo, l, etag)
 	switch {
 	case err != nil && haveCache:
-		return Result{Releases: cached.Releases, FetchedAt: cached.FetchedAt, RefreshErr: err}, nil
+		return listResult[T]{Items: cached.Items, FetchedAt: cached.FetchedAt, RefreshErr: err}, nil
 	case err != nil:
-		return Result{}, err
+		return listResult[T]{}, err
 	case notModified:
 		// 304: our data is still current. Only the timestamp changes.
 		cached.FetchedAt = now
-		s.writeCache(repo, cached)
-		return Result{Releases: cached.Releases, FetchedAt: now}, nil
+		writeCache(s, repo, l, cached)
+		return listResult[T]{Items: cached.Items, FetchedAt: now}, nil
 	default:
-		entry := cacheEntry{Repo: repo.String(), ETag: newETag, FetchedAt: now, Releases: fresh}
-		s.writeCache(repo, entry)
-		return Result{Releases: fresh, FetchedAt: now}, nil
+		entry := cacheEntry[T]{Repo: repo.String(), Kind: l.kind, ETag: newETag, FetchedAt: now, Items: fresh}
+		writeCache(s, repo, l, entry)
+		return listResult[T]{Items: fresh, FetchedAt: now}, nil
 	}
 }
 
-func (s *Source) fetch(ctx context.Context, repo Repo, etag string) (rels []Release, notModified bool, newETag string, err error) {
+// fetchList asks GitHub for the list, following up to l.maxPages pages.
+// The ETag is only used for single-page lists: a 304 for the first page
+// says nothing about the later ones.
+func fetchList[T any](ctx context.Context, s *Source, repo Repo, l list, etag string) (items []T, notModified bool, newETag string, err error) {
 	base := s.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
 	}
-	url := fmt.Sprintf("%s/repos/%s/%s/releases?per_page=100", base, repo.Owner, repo.Name)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	baseURL, err := url.Parse(base)
 	if err != nil {
-		return nil, false, "", err
+		return nil, false, "", fmt.Errorf("GitHub base URL: %w", err)
+	}
+	next := fmt.Sprintf("%s/repos/%s/%s/%s", strings.TrimSuffix(base, "/"), repo.Owner, repo.Name, l.path)
+
+	for page := 1; ; page++ {
+		var pageItems []T
+		var link string
+		pageItems, notModified, newETag, link, err = fetchPage[T](ctx, s, next, repo, l, etag)
+		if err != nil || notModified {
+			return nil, notModified, newETag, err
+		}
+		items = append(items, pageItems...)
+		if link == "" || page >= l.maxPages {
+			if link != "" && l.maxPages > 1 {
+				// Missing pages could hide an advisory; better no data
+				// than data that looks complete but is not.
+				return nil, false, "", fmt.Errorf("GitHub %s of %s: more than %d pages", l.kind, repo, l.maxPages)
+			}
+			if page > 1 {
+				newETag = ""
+			}
+			return items, false, newETag, nil
+		}
+		// The next page must be on the same host as the API: requests
+		// carry the token, which must never go anywhere else.
+		u, err := url.Parse(link)
+		if err != nil || u.Scheme != baseURL.Scheme || u.Host != baseURL.Host {
+			return nil, false, "", fmt.Errorf("GitHub %s of %s: next page link points to another host", l.kind, repo)
+		}
+		next, etag = link, ""
+	}
+}
+
+// fetchPage requests one page. link is the URL of the next page from the
+// Link header, or empty.
+func fetchPage[T any](ctx context.Context, s *Source, pageURL string, repo Repo, l list, etag string) (items []T, notModified bool, newETag, link string, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+	if err != nil {
+		return nil, false, "", "", err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -145,24 +233,45 @@ func (s *Source) fetch(ctx context.Context, repo Repo, etag string) (rels []Rele
 	// leaves the original host.
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, false, "", fmt.Errorf("GitHub releases of %s: %w", repo, describeError(err))
+		return nil, false, "", "", fmt.Errorf("GitHub %s of %s: %w", l.kind, repo, describeError(err))
 	}
 	defer resp.Body.Close()
 
 	switch {
 	case resp.StatusCode == http.StatusNotModified:
-		return nil, true, etag, nil
+		return nil, true, etag, "", nil
 	case (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests) &&
 		resp.Header.Get("X-RateLimit-Remaining") == "0":
-		return nil, false, "", fmt.Errorf("GitHub releases of %s: rate limit exceeded (set GITHUB_TOKEN for a higher limit)", repo)
+		return nil, false, "", "", fmt.Errorf("GitHub %s of %s: rate limit exceeded (set GITHUB_TOKEN for a higher limit)", l.kind, repo)
 	case resp.StatusCode != http.StatusOK:
-		return nil, false, "", fmt.Errorf("GitHub releases of %s: unexpected HTTP status %s", repo, ethereum.StatusText(resp.StatusCode))
+		return nil, false, "", "", fmt.Errorf("GitHub %s of %s: unexpected HTTP status %s", l.kind, repo, ethereum.StatusText(resp.StatusCode))
 	}
 
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(&rels); err != nil {
-		return nil, false, "", fmt.Errorf("GitHub releases of %s: decode response: %w", repo, err)
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(&items); err != nil {
+		return nil, false, "", "", fmt.Errorf("GitHub %s of %s: decode response: %w", l.kind, repo, err)
 	}
-	return rels, false, resp.Header.Get("ETag"), nil
+	return items, false, resp.Header.Get("ETag"), nextLink(resp.Header.Get("Link")), nil
+}
+
+// nextLink returns the URL marked rel="next" in a Link header, e.g.
+//
+//	<https://api.github.com/repositories/1/security-advisories?page=2>; rel="next", <…>; rel="last"
+//
+// (format: RFC 8288; GitHub documents it under "Using pagination in the
+// REST API").
+func nextLink(header string) string {
+	for part := range strings.SplitSeq(header, ",") {
+		target, params, ok := strings.Cut(strings.TrimSpace(part), ";")
+		if !ok || !strings.HasPrefix(target, "<") || !strings.HasSuffix(target, ">") {
+			continue
+		}
+		for p := range strings.SplitSeq(params, ";") {
+			if strings.TrimSpace(p) == `rel="next"` {
+				return strings.TrimSuffix(strings.TrimPrefix(target, "<"), ">")
+			}
+		}
+	}
+	return ""
 }
 
 // describeError shortens transport errors. GitHub URLs contain no secrets,
@@ -187,34 +296,34 @@ func (s *Source) now() time.Time {
 	return time.Now()
 }
 
-func (s *Source) cachePath(repo Repo) string {
-	return filepath.Join(s.CacheDir, "github", repo.Owner, repo.Name+".json")
+func cachePath(s *Source, repo Repo, l list) string {
+	return filepath.Join(s.CacheDir, "github", repo.Owner, repo.Name+l.file)
 }
 
 // readCache returns the cached entry. Missing or unreadable cache files are
 // treated as "no cache"; the data is simply fetched again.
-func (s *Source) readCache(repo Repo) (cacheEntry, bool) {
+func readCache[T any](s *Source, repo Repo, l list) (cacheEntry[T], bool) {
 	if s.CacheDir == "" {
-		return cacheEntry{}, false
+		return cacheEntry[T]{}, false
 	}
-	data, err := os.ReadFile(s.cachePath(repo))
+	data, err := os.ReadFile(cachePath(s, repo, l))
 	if err != nil {
-		return cacheEntry{}, false
+		return cacheEntry[T]{}, false
 	}
-	var e cacheEntry
-	if err := json.Unmarshal(data, &e); err != nil || e.Repo != repo.String() {
-		return cacheEntry{}, false
+	var e cacheEntry[T]
+	if err := json.Unmarshal(data, &e); err != nil || e.Repo != repo.String() || e.Kind != l.kind {
+		return cacheEntry[T]{}, false
 	}
 	return e, true
 }
 
 // writeCache stores an entry. Errors are ignored on purpose: a cache that
 // cannot be written only costs another request next time.
-func (s *Source) writeCache(repo Repo, e cacheEntry) {
+func writeCache[T any](s *Source, repo Repo, l list, e cacheEntry[T]) {
 	if s.CacheDir == "" {
 		return
 	}
-	path := s.cachePath(repo)
+	path := cachePath(s, repo, l)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return
 	}

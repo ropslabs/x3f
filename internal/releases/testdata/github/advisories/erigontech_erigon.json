@@ -1,0 +1,21 @@
+[
+  {
+    "ghsa_id": "GHSA-4c6q-hpx8-75wm",
+    "cve_id": null,
+    "html_url": "https://github.com/erigontech/erigon/security/advisories/GHSA-4c6q-hpx8-75wm",
+    "summary": "Data race in `requestData` due to read lock on `cacheRequest`",
+    "severity": "low",
+    "published_at": "2026-11-13T13:08:01Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": ">=v3.1.0 and  <v3.4.0",
+        "patched_versions": "v3.4.0"
+      }
+    ]
+  }
+]

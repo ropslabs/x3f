@@ -1,0 +1,325 @@
+[
+  {
+    "ghsa_id": "GHSA-m6j8-rg6r-7mv8",
+    "cve_id": "CVE-2026-26315",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-m6j8-rg6r-7mv8",
+    "summary": "Improper ECIES Public Key Validation in RLPx Handshake",
+    "severity": "medium",
+    "published_at": "2026-02-17T16:23:56Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "",
+          "name": ""
+        },
+        "vulnerable_version_range": "<= 1.16.8",
+        "patched_versions": ">= 1.16.9"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-2gjw-fg97-vg3r",
+    "cve_id": "CVE-2026-26314",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-2gjw-fg97-vg3r",
+    "summary": "DoS via malicious p2p message",
+    "severity": "high",
+    "published_at": "2026-02-17T16:23:48Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "<= 1.16.8",
+        "patched_versions": ">= 1.16.9"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-689v-6xwf-5jf3",
+    "cve_id": "CVE-2026-26313",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-689v-6xwf-5jf3",
+    "summary": "DoS via malicious p2p message",
+    "severity": "medium",
+    "published_at": "2026-02-17T16:23:39Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "< 1.17.0",
+        "patched_versions": ">= 1.17.0"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-mq3p-rrmp-79jg",
+    "cve_id": "CVE-2026-22868",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-mq3p-rrmp-79jg",
+    "summary": "DoS via malicious p2p message",
+    "severity": "medium",
+    "published_at": "2026-01-13T19:24:59Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "<= 1.16.7",
+        "patched_versions": ">= 1.16.8"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-mr7q-c9w9-wh4h",
+    "cve_id": "CVE-2026-22862",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-mr7q-c9w9-wh4h",
+    "summary": "DoS via malicious p2p message ",
+    "severity": "high",
+    "published_at": "2026-01-13T17:40:23Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "<= 1.16.7",
+        "patched_versions": ">= 1.16.8"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-q26p-9cq4-7fc2",
+    "cve_id": "CVE-2025-24883",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-q26p-9cq4-7fc2",
+    "summary": "DoS via malicious p2p message",
+    "severity": "high",
+    "published_at": "2025-01-30T13:23:02Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": ">= 1.14.0, < 1.14.13",
+        "patched_versions": ">= 1.14.13"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-4xc9-8hmq-j652",
+    "cve_id": "CVE-2024-32972",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-4xc9-8hmq-j652",
+    "summary": "DoS via malicious p2p message",
+    "severity": "high",
+    "published_at": "2024-05-06T13:24:45Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "< 1.13.15",
+        "patched_versions": ">= 1.13.15"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-ppjg-v974-84cm",
+    "cve_id": "CVE-2023-40591",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-ppjg-v974-84cm",
+    "summary": "DoS via malicious p2p message",
+    "severity": "high",
+    "published_at": "2023-09-06T07:29:44Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": ">= 1.10.0, < 1.12.1",
+        "patched_versions": ">= 1.12.1"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-wjxw-gh3m-7pm5",
+    "cve_id": "CVE-2022-29177",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-wjxw-gh3m-7pm5",
+    "summary": "DoS via malicious p2p message",
+    "severity": "low",
+    "published_at": "2022-05-11T08:51:21Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "< 1.10.17",
+        "patched_versions": ">= 1.10.17"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-59hh-656j-3p7v",
+    "cve_id": "CVE-2021-41173",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-59hh-656j-3p7v",
+    "summary": "DoS via malicious snap/1 request",
+    "severity": "medium",
+    "published_at": "2021-10-25T06:28:36Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "< 1.10.9",
+        "patched_versions": ">= 1.10.9"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-9856-9gg9-qcmq",
+    "cve_id": "CVE-2021-39137",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-9856-9gg9-qcmq",
+    "summary": "RETURNDATA corruption via datacopy",
+    "severity": "high",
+    "published_at": "2021-08-24T07:25:57Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "go-ethereum"
+        },
+        "vulnerable_version_range": ">= 1.10.0, < 1.10.8",
+        "patched_versions": ">= 1.10.8"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-xw37-57qp-9mm4",
+    "cve_id": "CVE-2020-26265",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-xw37-57qp-9mm4",
+    "summary": "Consensus flaw during block processing",
+    "severity": "high",
+    "published_at": "2020-12-11T08:07:15Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": ">= v1.9.4, < 1.9.20",
+        "patched_versions": ">= 1.9.20"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-r33q-22hv-j29q",
+    "cve_id": "CVE-2020-26264",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-r33q-22hv-j29q",
+    "summary": "LES Server DoS via GetProofsV2",
+    "severity": "medium",
+    "published_at": "2020-12-11T08:07:23Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "< 1.9.25",
+        "patched_versions": ">= 1.9.25"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-m6gx-rhvj-fh52",
+    "cve_id": "CVE-2020-28362",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-m6gx-rhvj-fh52",
+    "summary": "Denial of service due to Go CVE-2020-28362",
+    "severity": "critical",
+    "published_at": "2020-11-24T18:39:50Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "< 1.9.24",
+        "patched_versions": ">= 1.9.24"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-jm5c-rv3w-w83m",
+    "cve_id": "CVE-2020-26242",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-jm5c-rv3w-w83m",
+    "summary": "Denial of service via `MulMod`",
+    "severity": "high",
+    "published_at": "2020-11-24T18:40:03Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": ">= 1.9.16, < 1.9.18",
+        "patched_versions": ">= v1.9.18"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-69v6-xc2j-r2jf",
+    "cve_id": "CVE-2020-26241",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-69v6-xc2j-r2jf",
+    "summary": "Shallow copy in the 0x4 precompile could lead to EVM memory corruption",
+    "severity": "high",
+    "published_at": "2020-11-24T18:38:28Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": ">= 1.9.7, < 1.9.17",
+        "patched_versions": ">= 1.9.17"
+      }
+    ]
+  },
+  {
+    "ghsa_id": "GHSA-v592-xf75-856p",
+    "cve_id": "CVE-2020-26240",
+    "html_url": "https://github.com/ethereum/go-ethereum/security/advisories/GHSA-v592-xf75-856p",
+    "summary": "Ethash DAG generation bug can cause miners to create invalid PoW",
+    "severity": "medium",
+    "published_at": "2020-11-24T18:40:29Z",
+    "withdrawn_at": null,
+    "vulnerabilities": [
+      {
+        "package": {
+          "ecosystem": "go",
+          "name": "github.com/ethereum/go-ethereum"
+        },
+        "vulnerable_version_range": "< 1.9.24",
+        "patched_versions": ">= 1.9.24"
+      }
+    ]
+  }
+]
