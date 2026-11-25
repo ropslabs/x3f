@@ -1,0 +1,4 @@
+# Test dummy "apikey0123456789secret" in TestRunReport, before it was
+# marked with gitleaks:allow. It is not a real key.
+3748d50eb871350e1359ffd1efdbf6578bdbb312:cmd/x3f/main_test.go:generic-api-key:41
+9089ce34881bad3ec4bc9ba500de02628d337696:cmd/x3f/main_test.go:generic-api-key:185
