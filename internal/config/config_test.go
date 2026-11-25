@@ -4,8 +4,10 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoad(t *testing.T) {
@@ -24,7 +26,9 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("got %d nodes, want %d", len(cfg.Nodes), len(want))
 	}
 	for i := range want {
-		if cfg.Nodes[i] != want[i] {
+		// reflect.DeepEqual compares structs that contain slices, which
+		// == cannot.
+		if !reflect.DeepEqual(cfg.Nodes[i], want[i]) {
 			t.Errorf("nodes[%d] = %+v, want %+v", i, cfg.Nodes[i], want[i])
 		}
 	}
@@ -182,6 +186,65 @@ nodes:
 			wantErr: []string{"beacon_ulr"},
 		},
 		{
+			name: "ignore lists",
+			yaml: `
+ignore_advisories:
+  - {id: GHSA-v5gq-r843-8f73, reason: "no QBFT", expires: 2027-03-01}
+  - {id: GHSA-4h4f-925g-8h9p, reason: "no EIP-7702 traffic"}
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+    ignore_advisories:
+      - {id: GHSA-v5gq-r843-8f73, reason: "other expiry", expires: "2027-06-01"}
+`,
+		},
+		{
+			name: "ignore list mistakes",
+			yaml: `
+ignore_advisories:
+  - {id: CVE-2026-26314, reason: x}
+  - {id: GHSA-v5gq-r843-8f73}
+  - {id: ghsa-v5gq-r843-8f73, reason: "  "}
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+    ignore_advisories:
+      - {id: GHSA-4h4f-925g-8h9p-x, reason: typo}
+`,
+			wantErr: []string{
+				`ignore_advisories[0]: id "CVE-2026-26314" is not a GitHub advisory ID`,
+				"ignore_advisories GHSA-v5gq-r843-8f73: reason is required",
+				"ignore_advisories GHSA-v5gq-r843-8f73: listed twice",
+				`node "a": ignore_advisories[0]: id "GHSA-4h4f-925g-8h9p-x" is not`,
+			},
+		},
+		{
+			name: "ignore entry with a time of day",
+			yaml: `
+ignore_advisories:
+  - {id: GHSA-v5gq-r843-8f73, reason: x, expires: 2027-03-01T12:00:00Z}
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+`,
+			wantErr: []string{`line 3: "2027-03-01T12:00:00Z" is not a date (YYYY-MM-DD)`},
+		},
+		{
+			name: "ignore entry with an unknown field",
+			yaml: `
+ignore_advisories:
+  - {id: GHSA-v5gq-r843-8f73, reason: x, expiry: 2027-03-01}
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+`,
+			wantErr: []string{"field expiry not found"},
+		},
+		{
 			name:    "invalid yaml",
 			yaml:    "nodes: [\n",
 			wantErr: []string{"parse:"},
@@ -229,5 +292,59 @@ nodes:
 		if got := cfg.Nodes[0].Network; got != "mainnet" {
 			t.Errorf("%q normalized to %q, want %q", in, got, "mainnet")
 		}
+	}
+}
+
+func TestIgnoreAdvisories(t *testing.T) {
+	cfg, err := Parse([]byte(`
+ignore_advisories:
+  - {id: ghsa-V5GQ-r843-8f73, reason: "no QBFT", expires: 2027-03-01}
+  - {id: GHSA-4h4f-925g-8h9p, reason: global}
+nodes:
+  - name: a
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+    ignore_advisories:
+      - {id: GHSA-4h4f-925g-8h9p, reason: node}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := cfg.IgnoreAdvisories
+	if g[0].ID != "GHSA-v5gq-r843-8f73" {
+		t.Errorf("ID normalized to %q", g[0].ID)
+	}
+	if want := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC); !g[0].Expires.Equal(want) {
+		t.Errorf("Expires = %v, want %v", g[0].Expires, want)
+	}
+	if !g[1].Expires.IsZero() {
+		t.Errorf("Expires = %v, want zero", g[1].Expires)
+	}
+
+	// The node's entry replaces the global one with the same ID.
+	merged := MergeIgnores(g, cfg.Nodes[0].IgnoreAdvisories)
+	var got []string
+	for _, e := range merged {
+		got = append(got, e.ID+" "+e.Reason)
+	}
+	want := []string{"GHSA-4h4f-925g-8h9p node", "GHSA-v5gq-r843-8f73 no QBFT"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("merged = %q, want %q", got, want)
+	}
+
+	for _, tt := range []struct {
+		at   time.Time
+		want bool
+	}{
+		{time.Date(2027, 2, 28, 23, 59, 59, 0, time.UTC), false},
+		{time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC), true},
+		{time.Date(2027, 3, 1, 0, 30, 0, 0, time.FixedZone("CET", 3600)), false}, // 23:30 UTC the day before
+	} {
+		if got := g[0].Expired(tt.at); got != tt.want {
+			t.Errorf("Expired(%v) = %v, want %v", tt.at, got, tt.want)
+		}
+	}
+	if g[1].Expired(time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Error("entry without expires expired")
 	}
 }

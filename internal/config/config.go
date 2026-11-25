@@ -11,7 +11,10 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 
@@ -20,7 +23,60 @@ import (
 
 // Config is the top-level structure of x3f.yaml.
 type Config struct {
-	Nodes []Node `yaml:"nodes"`
+	// IgnoreAdvisories applies to every node.
+	IgnoreAdvisories []AdvisoryIgnore `yaml:"ignore_advisories,omitempty"`
+	Nodes            []Node           `yaml:"nodes"`
+}
+
+// AdvisoryIgnore tells x3f not to count one security advisory, e.g. one
+// about a feature the node does not use. Ignored advisories are still
+// reported as a note, so nothing disappears silently.
+type AdvisoryIgnore struct {
+	// ID is the GitHub advisory ID, e.g. "GHSA-v5gq-r843-8f73". Validate
+	// normalizes it to that spelling.
+	ID string `yaml:"id"`
+	// Reason is required: why the advisory does not apply.
+	Reason string `yaml:"reason"`
+	// Expires is optional. From this day on (00:00 UTC) the entry no
+	// longer applies and the advisory counts again.
+	Expires Date `yaml:"expires,omitempty"`
+}
+
+// Expired reports whether the entry has an expiry date that has been
+// reached.
+func (e AdvisoryIgnore) Expired(now time.Time) bool {
+	return !e.Expires.IsZero() && !now.Before(e.Expires.Time)
+}
+
+// Date is a calendar day written as YYYY-MM-DD, stored as midnight UTC.
+// Embedding time.Time gives Date all of its methods (IsZero, Format, ...).
+type Date struct {
+	time.Time
+}
+
+// UnmarshalYAML implements yaml.Unmarshaler: the YAML decoder calls it
+// instead of decoding the value itself. It accepts only a plain date, not
+// the full YAML timestamp syntax with a time of day.
+func (d *Date) UnmarshalYAML(n *yaml.Node) error {
+	t, err := time.Parse(time.DateOnly, n.Value)
+	if n.Kind != yaml.ScalarNode || err != nil {
+		return fmt.Errorf("line %d: %q is not a date (YYYY-MM-DD)", n.Line, n.Value)
+	}
+	d.Time = t
+	return nil
+}
+
+// MergeIgnores returns the ignore list for one node: its own entries plus
+// the global ones. A node entry replaces a global entry with the same ID,
+// e.g. to give it a different expiry date.
+func MergeIgnores(global, node []AdvisoryIgnore) []AdvisoryIgnore {
+	merged := slices.Clone(node)
+	for _, g := range global {
+		if !slices.ContainsFunc(node, func(n AdvisoryIgnore) bool { return n.ID == g.ID }) {
+			merged = append(merged, g)
+		}
+	}
+	return merged
 }
 
 // Node is one Ethereum node, made up of an execution client and a consensus
@@ -36,6 +92,9 @@ type Node struct {
 	// capitalisation), x3f reports it as critical when the node is on a
 	// different network. Validate normalizes it to lowercase.
 	Network string `yaml:"network,omitempty"`
+	// IgnoreAdvisories applies to this node in addition to the global
+	// list.
+	IgnoreAdvisories []AdvisoryIgnore `yaml:"ignore_advisories,omitempty"`
 }
 
 // Load reads the config file at path, parses it and validates it.
@@ -85,6 +144,7 @@ func (c *Config) Validate() error {
 	if len(c.Nodes) == 0 {
 		errs = append(errs, errors.New("no nodes configured"))
 	}
+	errs = append(errs, validateIgnores("ignore_advisories", c.IgnoreAdvisories)...)
 
 	// map[string]bool used as a set to detect duplicate names.
 	seen := make(map[string]bool)
@@ -119,11 +179,43 @@ func (c *Config) Validate() error {
 				c.Nodes[i].Network = normalized
 			}
 		}
+		errs = append(errs, validateIgnores(label+": ignore_advisories", n.IgnoreAdvisories)...)
 	}
 
 	// errors.Join combines several errors into one; it returns nil if the
 	// slice is empty.
 	return errors.Join(errs...)
+}
+
+// ghsaRe matches a GitHub advisory ID after lowercasing, e.g.
+// "ghsa-v5gq-r843-8f73".
+var ghsaRe = regexp.MustCompile(`^ghsa(-[0-9a-z]{4}){3}$`)
+
+// validateIgnores checks one ignore list and normalizes its IDs. The slice
+// shares its backing array with the config, so writing list[i] changes the
+// config itself.
+func validateIgnores(label string, list []AdvisoryIgnore) []error {
+	var errs []error
+	seen := make(map[string]bool)
+	for i, e := range list {
+		item := fmt.Sprintf("%s[%d]", label, i)
+		id := strings.ToLower(strings.TrimSpace(e.ID))
+		if !ghsaRe.MatchString(id) {
+			errs = append(errs, fmt.Errorf("%s: id %q is not a GitHub advisory ID such as GHSA-xxxx-xxxx-xxxx", item, e.ID))
+		} else {
+			id = "GHSA" + id[len("ghsa"):]
+			list[i].ID = id
+			item = fmt.Sprintf("%s %s", label, id)
+			if seen[id] {
+				errs = append(errs, fmt.Errorf("%s: listed twice", item))
+			}
+			seen[id] = true
+		}
+		if strings.TrimSpace(e.Reason) == "" {
+			errs = append(errs, fmt.Errorf("%s: reason is required", item))
+		}
+	}
+	return errs
 }
 
 func validateURL(raw string) error {
