@@ -1,6 +1,7 @@
 package status
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -149,7 +150,7 @@ func TestAssessForksNextFork(t *testing.T) {
 	ep, ts := epochAt(forkNow.Add(5*24*time.Hour + time.Hour))
 	bpo := synthetic(t, fmt.Sprintf(`      - {name: BPO9, type: bpo, epoch: %d, timestamp: %d, sources: [https://example.org/synthetic]}
 `, ep, ts))
-	future := synthetic(t, fmt.Sprintf(`      - {name: Later, status: postponed, epoch: %d, timestamp: %d, scheduled_in: {geth: 2.0.0}, removed_in: {geth: 2.0.1}, sources: [https://example.org/synthetic]}
+	future := synthetic(t, fmt.Sprintf(`      - {name: Later, execution: Amsterdam, consensus: Gloas, status: postponed, epoch: %d, timestamp: %d, scheduled_in: {geth: 2.0.0}, removed_in: {geth: 2.0.1}, sources: [https://example.org/synthetic]}
 `, ep, ts))
 
 	tests := []struct {
@@ -338,4 +339,243 @@ func hasFinding(a Assessment, substr string) bool {
 		}
 	}
 	return false
+}
+
+// Node answers as recorded live on 2026-11-24
+// (internal/ethereum/testdata/execution/live/eth-config-*.json and
+// consensus/live/spec-*.json); variations are marked as synthetic.
+const ff = ethereum.FarFutureEpoch
+
+func elConfig(current int64, next ...int64) *ethereum.ExecutionForkConfig {
+	cfg := &ethereum.ExecutionForkConfig{Current: ethereum.ForkActivation{ActivationTime: current}}
+	if len(next) > 0 {
+		cfg.Next = &ethereum.ForkActivation{ActivationTime: next[0]}
+		cfg.Last = &ethereum.ForkActivation{ActivationTime: next[len(next)-1]}
+	}
+	return cfg
+}
+
+func clConfig(epochs map[string]uint64, blobs ...uint64) *ethereum.ConsensusForkConfig {
+	return &ethereum.ConsensusForkConfig{Epochs: epochs, BlobSchedule: blobs}
+}
+
+func TestAssessForksNodeAnswer(t *testing.T) {
+	s, err := forks.Default()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const mainnet, hoodi = 1, 560048
+	geth := cv("Geth/v1.17.10-stable-1df30b18/linux-amd64/go1.27.3")
+	lighthouse := cv("Lighthouse/v8.3.3-57c2abc/x86_64-linux")
+	lodestar := cv("Lodestar/v1.51.0/7923280")
+	// Live answers.
+	mainnetEL := elConfig(1767747671) // BPO2
+	hoodiEL := elConfig(1762955544)   // BPO2
+	mainnetCL := clConfig(map[string]uint64{"ELECTRA": 364032, "FULU": 411392, "GLOAS": ff, "HEZE": ff}, 412672, 419072)
+	nimbusCL := clConfig(map[string]uint64{"FULU": 411392, "GLOAS": ff}, 412672, 419072) // no HEZE key
+	hoodiCL := clConfig(map[string]uint64{"ELECTRA": 2048, "FULU": 50688, "GLOAS": ff, "HEZE": ff}, 52480, 54016)
+	hoodiEpochTime := func(ep uint64) int64 { return 1742213400 + int64(ep)*384 }
+
+	tests := []struct {
+		name      string
+		chain     uint64
+		el, cl    ethereum.ClientVersion
+		elCfg     *ethereum.ExecutionForkConfig
+		elErr     error
+		clCfg     *ethereum.ConsensusForkConfig
+		clErr     error
+		wantLevel Level
+		wantCell  string
+		wantMsgs  []string
+	}{
+		{name: "mainnet live", chain: mainnet, el: geth, cl: lighthouse, elCfg: mainnetEL, clCfg: mainnetCL,
+			wantLevel: OK, wantCell: "none scheduled"},
+		{name: "nimbus does not know heze: fine while not scheduled", chain: mainnet, el: geth, cl: cv("Nimbus/v26.10.2-f64d64-stateofus"), elCfg: mainnetEL, clCfg: nimbusCL,
+			wantLevel: OK, wantCell: "none scheduled"},
+		{name: "hoodi live", chain: hoodi, el: geth, cl: lodestar, elCfg: hoodiEL, clCfg: hoodiCL,
+			wantLevel: OK, wantCell: "none scheduled"},
+		{
+			// The node answer wins over the version range of 4b: a 1.17.9
+			// build without the postponed schedule is fine.
+			name: "node answer wins over the version rule", chain: hoodi,
+			el: cv("Geth/v1.17.9-stable-aaaaaaaa/linux-amd64/go1.27.3"), cl: lodestar, elCfg: hoodiEL, clCfg: hoodiCL,
+			wantLevel: OK, wantCell: "none scheduled",
+		},
+		{
+			name: "fallback to the version rule, with a note", chain: hoodi,
+			el: cv("Geth/v1.17.9-stable-aaaaaaaa/linux-amd64/go1.27.3"), cl: lodestar,
+			elErr: errors.New("eth_config: JSON-RPC error -32601: The method eth_config does not exist/is not available"), clCfg: hoodiCL,
+			wantLevel: Crit, wantCell: "EL has old Glamsterdam schedule",
+			wantMsgs: []string{
+				"fork check of the execution client by version only: eth_config: JSON-RPC error -32601",
+				"Geth 1.17.9 still contains the postponed Glamsterdam schedule",
+			},
+		},
+		{
+			// Synthetic: the node activated the postponed fork.
+			name: "EL activated the postponed fork", chain: hoodi, el: cv("Geth/v1.17.9-stable-aaaaaaaa/linux-amd64/go1.27.3"), cl: lodestar,
+			elCfg: elConfig(1793036568), clCfg: hoodiCL,
+			wantLevel: Crit, wantCell: "EL has old Glamsterdam schedule",
+			wantMsgs: []string{"Geth 1.17.9 still schedules the postponed Glamsterdam at its former time (2026-10-26 17:42 UTC, eth_config current); update to 1.17.10 or later; the former activation time has passed"},
+		},
+		{
+			// Synthetic: CL still has Gloas at the former epoch.
+			name: "CL still schedules the postponed fork", chain: hoodi, el: geth, cl: lodestar, elCfg: hoodiEL,
+			clCfg:     clConfig(map[string]uint64{"FULU": 50688, "GLOAS": 132352}, 52480, 54016),
+			wantLevel: Crit, wantCell: "CL has old Glamsterdam schedule",
+			wantMsgs: []string{"Lodestar 1.51.0 still schedules the postponed Glamsterdam at its former time (2026-10-26 17:42 UTC, epoch 132352); update to 1.50.1 or later; the former activation time has passed"},
+		},
+		{
+			// Synthetic: Gloas at a new epoch that forks.yaml does not have
+			// yet (e.g. a new date announced after the last update).
+			name: "CL schedules the postponed fork at a new date", chain: hoodi, el: geth, cl: lodestar, elCfg: hoodiEL,
+			clCfg:     clConfig(map[string]uint64{"FULU": 50688, "GLOAS": 150000}, 52480, 54016),
+			wantLevel: Warn, wantCell: "CL schedules unknown fork",
+			wantMsgs: []string{fmt.Sprintf("Lodestar 1.51.0 schedules Gloas at epoch 150000 at %s (in 49 days) that forks.yaml (updated 2026-11-24) does not list: forks.yaml may be outdated",
+				time.Unix(hoodiEpochTime(150000), 0).UTC().Format("2006-01-02 15:04 UTC"))},
+		},
+		{
+			// Synthetic: EL one fork behind.
+			name: "EL still on BPO1", chain: mainnet, el: geth, cl: lighthouse, elCfg: elConfig(1765290071), clCfg: mainnetCL,
+			wantLevel: Crit, wantCell: "EL not on BPO2",
+			wantMsgs: []string{"Geth 1.17.10 is still on BPO1 (eth_config), but BPO2 is active since 2026-01-07: it cannot follow mainnet"},
+		},
+		{
+			// Synthetic: Prague activation time (before forks.yaml starts).
+			name: "EL on a fork before forks.yaml", chain: mainnet, el: geth, cl: lighthouse, elCfg: elConfig(1746612311), clCfg: mainnetCL,
+			wantLevel: Crit, wantCell: "EL not on BPO2",
+			wantMsgs: []string{"is still on a fork activated at 2025-05-07 10:05 UTC (eth_config), but BPO2 is active"},
+		},
+		{
+			// Synthetic: CL without the BPO2 entry.
+			name: "CL misses BPO2", chain: mainnet, el: geth, cl: lighthouse, elCfg: mainnetEL,
+			clCfg:     clConfig(map[string]uint64{"FULU": 411392, "GLOAS": ff}, 412672),
+			wantLevel: Crit, wantCell: "CL not on BPO2",
+			wantMsgs: []string{"Lighthouse 8.3.3 is not on BPO2 (BLOB_SCHEDULE has no entry for epoch 419072), which is active since 2026-01-07: it cannot follow mainnet"},
+		},
+		{
+			// Synthetic: a consensus client without Fulu.
+			name: "CL before Fusaka", chain: mainnet, el: geth, cl: lighthouse, elCfg: mainnetEL,
+			clCfg:     clConfig(map[string]uint64{"ELECTRA": 364032, "FULU": ff}),
+			wantLevel: Crit, wantCell: "CL not on Fusaka",
+			wantMsgs: []string{"is not on Fusaka (Fulu is not scheduled (FULU_FORK_EPOCH is far future))"},
+		},
+		{
+			// Synthetic: entries for hard forks in BLOB_SCHEDULE (as in the
+			// beacon-APIs example) are not forks of their own.
+			name: "BLOB_SCHEDULE entries at hard forks", chain: mainnet, el: geth, cl: lighthouse, elCfg: mainnetEL,
+			clCfg:     clConfig(map[string]uint64{"DENEB": 269568, "ELECTRA": 364032, "FULU": 411392, "GLOAS": ff}, 269568, 364032, 411392, 412672, 419072),
+			wantLevel: OK, wantCell: "none scheduled",
+		},
+		{
+			// Synthetic: unknown forks on both layers, far ahead and close.
+			name: "unknown forks", chain: mainnet, el: geth, cl: lighthouse,
+			elCfg:     elConfig(1767747671, forkNow.Add(40*24*time.Hour).Unix()),
+			clCfg:     clConfig(map[string]uint64{"FULU": 411392, "GLOAS": ff, "HEZE": 500000}, 412672, 419072, 450000),
+			wantLevel: Crit, wantCell: "EL schedules unknown fork",
+			wantMsgs: []string{
+				"Geth 1.17.10 schedules a fork at 2027-01-03 12:00 UTC (in 40 days) that forks.yaml (updated 2026-11-24) does not list",
+				"Lighthouse 8.3.3 schedules Heze at epoch 500000",
+				"Lighthouse 8.3.3 schedules a blob parameter change at epoch 450000 at 2026-05-24 12:00 UTC (already passed)",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := AssessForks(ForkInput{
+				Schedule: s, ChainID: tt.chain, HaveChain: true,
+				Execution: tt.el, Consensus: tt.cl,
+				ExecutionConfig: tt.elCfg, ExecutionConfigErr: tt.elErr,
+				ConsensusConfig: tt.clCfg, ConsensusConfigErr: tt.clErr,
+				Now: forkNow, CriticalWithin: 14 * 24 * time.Hour,
+			})
+			if r.Cell != tt.wantCell {
+				t.Errorf("cell = %q, want %q", r.Cell, tt.wantCell)
+			}
+			checkAssessment(t, r.Assessment, tt.wantLevel, tt.wantMsgs)
+		})
+	}
+}
+
+func TestAssessForksNodeNextFork(t *testing.T) {
+	pastEp, pastTs := epochAt(forkNow.Add(-30 * 24 * time.Hour))
+	ep, ts := epochAt(forkNow.Add(5*24*time.Hour + time.Hour))
+	farEp, farTs := epochAt(forkNow.Add(20*24*time.Hour + time.Hour))
+	hard := func(ep uint64, ts int64) *forks.Schedule {
+		return synthetic(t, fmt.Sprintf(`      - {name: Next9, execution: Amsterdam, consensus: Gloas, epoch: %d, timestamp: %d, min_versions: {geth: 1.1.0, lighthouse: 1.1.0}, sources: [https://example.org/synthetic]}
+`, ep, ts))
+	}
+	soon, far := hard(ep, ts), hard(farEp, farTs)
+	bpo := synthetic(t, fmt.Sprintf(`      - {name: BPO9, type: bpo, epoch: %d, timestamp: %d, sources: [https://example.org/synthetic]}
+`, ep, ts))
+
+	geth, reth := cv("Geth/v1.0.0-stable/x"), cv("reth/v1.0.0-abc1234/x")
+	lighthouse := cv("Lighthouse/v1.0.0-abc1234/x")
+	elReady := elConfig(pastTs, ts)
+	clReady := clConfig(map[string]uint64{"FULU": pastEp, "GLOAS": ep})
+	clOld := clConfig(map[string]uint64{"FULU": pastEp, "GLOAS": ff})
+
+	tests := []struct {
+		name      string
+		s         *forks.Schedule
+		el        ethereum.ClientVersion
+		elCfg     *ethereum.ExecutionForkConfig
+		clCfg     *ethereum.ConsensusForkConfig
+		wantLevel Level
+		wantCell  string
+		wantMsgs  []string
+	}{
+		{name: "both ready", s: soon, el: geth, elCfg: elReady, clCfg: clReady,
+			wantLevel: OK, wantCell: "Next9 in 5 days: ready"},
+		{name: "EL without next fork, release exists, close", s: soon, el: geth, elCfg: elConfig(pastTs), clCfg: clReady,
+			wantLevel: Crit, wantCell: "Next9 in 5 days: EL not ready",
+			wantMsgs: []string{"Geth 1.0.0 is not ready for Next9 on mainnet (" + time.Unix(ts, 0).UTC().Format(time.DateOnly) + ", in 5 days): eth_config shows no next fork; needs 1.1.0 or later"}},
+		{name: "EL next at another time", s: soon, el: geth, elCfg: elConfig(pastTs, ts+384), clCfg: clReady,
+			wantLevel: Crit, wantCell: "EL schedules unknown fork",
+			wantMsgs: []string{"Geth 1.0.0 schedules a fork at", "eth_config shows the next fork at"}},
+		{name: "far away: yellow", s: far, el: geth, elCfg: elConfig(pastTs), clCfg: clConfig(map[string]uint64{"FULU": pastEp, "GLOAS": farEp}),
+			wantLevel: Warn, wantCell: "Next9 in 20 days: EL not ready",
+			wantMsgs: []string{"eth_config shows no next fork; needs 1.1.0 or later"}},
+		{name: "no ready release known: yellow", s: soon, el: reth, elCfg: elConfig(pastTs), clCfg: clReady,
+			wantLevel: Warn, wantCell: "Next9 in 5 days: EL not ready",
+			wantMsgs: []string{"no Reth release announced yet (waiting for client release)"}},
+		{name: "client not recognized: yellow", s: soon, el: cv("MEVblocker"), elCfg: elConfig(pastTs), clCfg: clReady,
+			wantLevel: Warn, wantCell: "Next9 in 5 days: EL not ready",
+			wantMsgs: []string{"the execution client is not ready for Next9 on mainnet (2026-11-29, in 5 days): eth_config shows no next fork; client not recognized, so it is unknown whether a ready release exists"}},
+		{name: "node answer works without a recognized version", s: soon, el: cv("MEVblocker"), elCfg: elReady, clCfg: clReady,
+			wantLevel: OK, wantCell: "Next9 in 5 days: ready"},
+		{name: "CL fork far future", s: soon, el: geth, elCfg: elReady, clCfg: clOld,
+			wantLevel: Crit, wantCell: "Next9 in 5 days: CL not ready",
+			wantMsgs: []string{"Lighthouse 1.0.0 is not ready for Next9 on mainnet (2026-11-29, in 5 days): Gloas is not scheduled (GLOAS_FORK_EPOCH is far future); needs 1.1.0 or later"}},
+		{name: "CL does not know the fork", s: soon, el: geth, elCfg: elReady, clCfg: clConfig(map[string]uint64{"FULU": pastEp}),
+			wantLevel: Crit, wantCell: "Next9 in 5 days: CL not ready",
+			wantMsgs: []string{"the client does not know Gloas (no GLOAS_FORK_EPOCH)"}},
+		{name: "CL fork at another epoch", s: soon, el: geth, elCfg: elReady, clCfg: clConfig(map[string]uint64{"FULU": pastEp, "GLOAS": ep + 1}),
+			wantLevel: Crit, wantCell: "Next9 in 5 days: CL not ready",
+			wantMsgs: []string{fmt.Sprintf("GLOAS_FORK_EPOCH is %d, not %d", ep+1, ep)}},
+		{name: "BPO ready", s: bpo, el: geth, elCfg: elReady, clCfg: clConfig(map[string]uint64{"FULU": pastEp}, ep),
+			wantLevel: OK, wantCell: "BPO9 in 5 days: ready"},
+		{name: "BPO missing in blob schedule", s: bpo, el: geth, elCfg: elReady, clCfg: clConfig(map[string]uint64{"FULU": pastEp}),
+			wantLevel: Crit, wantCell: "BPO9 in 5 days: CL not ready",
+			// The BPO uses the releases of Past (1.0.0): the running release
+			// supports it, so the node's configuration is the problem.
+			wantMsgs: []string{fmt.Sprintf("BLOB_SCHEDULE has no entry for epoch %d; the release supports it (minimum 1.0.0), so check the node's chain configuration", ep)}},
+		{name: "release supports the fork, node does not schedule it", s: soon, el: cv("Geth/v1.1.0-stable/x"), elCfg: elConfig(pastTs), clCfg: clReady,
+			wantLevel: Crit, wantCell: "Next9 in 5 days: EL not ready",
+			wantMsgs: []string{"Geth 1.1.0 is not ready for Next9 on mainnet (2026-11-29, in 5 days): eth_config shows no next fork; the release supports it (minimum 1.1.0), so check the node's chain configuration"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := AssessForks(ForkInput{
+				Schedule: tt.s, ChainID: 1, HaveChain: true,
+				Execution: tt.el, Consensus: lighthouse,
+				ExecutionConfig: tt.elCfg, ConsensusConfig: tt.clCfg,
+				Now: forkNow, CriticalWithin: 14 * 24 * time.Hour,
+			})
+			if r.Cell != tt.wantCell {
+				t.Errorf("cell = %q, want %q", r.Cell, tt.wantCell)
+			}
+			checkAssessment(t, r.Assessment, tt.wantLevel, tt.wantMsgs)
+		})
+	}
 }

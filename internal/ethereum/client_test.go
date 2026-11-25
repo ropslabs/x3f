@@ -373,6 +373,25 @@ func TestErrorsDoNotLeakURL(t *testing.T) {
 		}
 	})
 
+	t.Run("fork config calls", func(t *testing.T) {
+		// Synthetic: the server echoes the URL in a JSON-RPC error, and
+		// answers the beacon spec request with an echoed 404 page.
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet {
+				http.Error(w, "no route "+r.URL.String(), http.StatusNotFound)
+				return
+			}
+			msg, _ := json.Marshal("method not found at " + r.URL.String())
+			io.WriteString(w, `{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":`+string(msg)+`}}`)
+		}))
+		defer srv.Close()
+
+		_, err := NewClient(nil).ExecutionForkConfig(context.Background(), withKeys(srv.URL))
+		assertClean(t, err)
+		_, err = NewClient(nil).ConsensusForkConfig(context.Background(), withKeys(srv.URL))
+		assertClean(t, err)
+	})
+
 	t.Run("unparsable endpoint", func(t *testing.T) {
 		_, err := NewClient(nil).ExecutionVersion(context.Background(), "http://bad host/"+pathKey)
 		assertClean(t, err)

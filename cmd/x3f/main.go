@@ -34,7 +34,10 @@ const usageText = `Usage: x3f [flags]
 x3f queries the Ethereum nodes listed in the config file (read-only) and
 reports the network, client versions, sync status, whether the clients are
 behind their latest stable GitHub release and whether they are ready for
-the next fork (built-in fork schedule, see -forks).
+the next fork: the node's own fork schedule (eth_config,
+/eth/v1/config/spec) is compared with the built-in one (see -forks); if a
+client does not report it, its version is compared with the announced
+releases.
 
 Flags:
 `

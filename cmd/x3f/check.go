@@ -20,15 +20,20 @@ import (
 )
 
 // layerResult holds what we learned about one client (execution or
-// consensus) of a node. S is the type of the sync status; Go generics let
-// both layers share this struct and the code that fills it.
-type layerResult[S any] struct {
+// consensus) of a node. S is the type of the sync status and F the type of
+// the fork configuration; Go generics let both layers share this struct
+// and the code that fills it.
+type layerResult[S, F any] struct {
 	Version    ethereum.ClientVersion
 	VersionErr error
 	Sync       S
 	SyncErr    error
 	ChainID    uint64
 	ChainIDErr error
+	// ForkConfig is the fork schedule the client reports; nil if the
+	// request failed (ForkConfigErr) or was skipped.
+	ForkConfig    *F
+	ForkConfigErr error
 	// Unreachable is set when the version request could not reach the
 	// client at all (timeout, connection or DNS failure). The sync and
 	// chain ID requests would fail the same way and wait for the same
@@ -45,8 +50,8 @@ type nodeResult struct {
 	Name string
 	// Network is the expected network from the config ("" if not set).
 	Network   string
-	Execution layerResult[ethereum.ExecutionSyncStatus]
-	Consensus layerResult[ethereum.ConsensusSyncStatus]
+	Execution layerResult[ethereum.ExecutionSyncStatus, ethereum.ExecutionForkConfig]
+	Consensus layerResult[ethereum.ConsensusSyncStatus, ethereum.ConsensusForkConfig]
 }
 
 // checkNodes queries all nodes concurrently and returns one result per node,
@@ -68,29 +73,30 @@ func checkNodes(ctx context.Context, client *ethereum.Client, nodes []config.Nod
 		// distinct memory, so no mutex is needed.
 		wg.Go(func() {
 			results[i].Execution = queryLayer(ctx, timeout, n.ExecutionURL,
-				client.ExecutionVersion, client.ExecutionSync, client.ExecutionChainID)
+				client.ExecutionVersion, client.ExecutionSync, client.ExecutionChainID, client.ExecutionForkConfig)
 		})
 		wg.Go(func() {
 			results[i].Consensus = queryLayer(ctx, timeout, n.BeaconURL,
-				client.ConsensusVersion, client.ConsensusSync, client.ConsensusChainID)
+				client.ConsensusVersion, client.ConsensusSync, client.ConsensusChainID, client.ConsensusForkConfig)
 		})
 	}
 	wg.Wait()
 	return results
 }
 
-// queryLayer asks one client for its version, then its sync status and
-// chain ID. The later requests are skipped only if the client was
-// unreachable.
+// queryLayer asks one client for its version, then its sync status, chain
+// ID and fork configuration. The later requests are skipped only if the
+// client was unreachable.
 // fetchVersion and fetchSync are method values such as
 // client.ExecutionVersion: functions bound to their receiver, which can be
 // passed around like any other function.
-func queryLayer[S any](ctx context.Context, timeout time.Duration, endpoint string,
+func queryLayer[S, F any](ctx context.Context, timeout time.Duration, endpoint string,
 	fetchVersion func(context.Context, string) (string, error),
 	fetchSync func(context.Context, string) (S, error),
-	fetchChainID func(context.Context, string) (uint64, error)) layerResult[S] {
+	fetchChainID func(context.Context, string) (uint64, error),
+	fetchForkConfig func(context.Context, string) (F, error)) layerResult[S, F] {
 
-	var r layerResult[S]
+	var r layerResult[S, F]
 
 	raw, err := withTimeout(ctx, timeout, endpoint, fetchVersion)
 	if err != nil {
@@ -104,6 +110,11 @@ func queryLayer[S any](ctx context.Context, timeout time.Duration, endpoint stri
 	}
 	r.Sync, r.SyncErr = withTimeout(ctx, timeout, endpoint, fetchSync)
 	r.ChainID, r.ChainIDErr = withTimeout(ctx, timeout, endpoint, fetchChainID)
+	if cfg, err := withTimeout(ctx, timeout, endpoint, fetchForkConfig); err != nil {
+		r.ForkConfigErr = err
+	} else {
+		r.ForkConfig = &cfg
+	}
 	return r
 }
 
@@ -228,6 +239,8 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, p assessPar
 		fork := status.AssessForks(status.ForkInput{
 			Schedule: p.schedule, ChainID: chainID, HaveChain: haveChain,
 			Execution: r.Execution.Version, Consensus: r.Consensus.Version,
+			ExecutionConfig: r.Execution.ForkConfig, ExecutionConfigErr: r.Execution.ForkConfigErr,
+			ConsensusConfig: r.Consensus.ForkConfig, ConsensusConfigErr: r.Consensus.ForkConfigErr,
 			Now: now, CriticalWithin: p.forkCriticalIn,
 		})
 		a := [6]status.Assessment{
@@ -264,13 +277,19 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, p assessPar
 	return rows, overall
 }
 
-// detectedChain returns the node's chain ID, preferring the execution side.
-// If the two sides disagree, AssessNetwork already reports it as critical.
+// detectedChain returns the node's chain ID for the fork check, preferring
+// the execution side. If the two sides disagree, there is no single
+// schedule to compare against: AssessNetwork already reports it as
+// critical, and a fork check would only add follow-up errors.
 func detectedChain(r nodeResult) (uint64, bool) {
-	if !r.Execution.Unreachable && r.Execution.ChainIDErr == nil {
+	haveEL := !r.Execution.Unreachable && r.Execution.ChainIDErr == nil
+	haveCL := !r.Consensus.Unreachable && r.Consensus.ChainIDErr == nil
+	switch {
+	case haveEL && haveCL && r.Execution.ChainID != r.Consensus.ChainID:
+		return 0, false
+	case haveEL:
 		return r.Execution.ChainID, true
-	}
-	if !r.Consensus.Unreachable && r.Consensus.ChainIDErr == nil {
+	case haveCL:
 		return r.Consensus.ChainID, true
 	}
 	return 0, false

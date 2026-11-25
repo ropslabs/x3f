@@ -160,6 +160,11 @@ func Parse(data []byte) (*Schedule, error) {
 			if ff.Type != "" && ff.Type != "bpo" {
 				fail("%s: type %q, want \"bpo\" or nothing", label, ff.Type)
 			}
+			// Hard forks need both layer names: x3f matches them against
+			// the <NAME>_FORK_EPOCH keys of the consensus client.
+			if !fk.BPO && (ff.Execution == "" || ff.Consensus == "") {
+				fail("%s: execution and consensus fork names are required", label)
+			}
 			if ff.Status != "" && ff.Status != "postponed" {
 				fail("%s: status %q, want \"postponed\" or nothing", label, ff.Status)
 			}
@@ -243,6 +248,11 @@ func (n Network) Next(now time.Time) (Fork, bool) {
 		}
 	}
 	return Fork{}, false
+}
+
+// EpochTime returns the start time of a consensus layer epoch.
+func (n Network) EpochTime(epoch uint64) time.Time {
+	return time.Unix(n.GenesisTime+int64(epoch)*secondsPerEpoch, 0).UTC()
 }
 
 // Postponed returns the postponed forks.

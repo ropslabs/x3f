@@ -288,3 +288,43 @@ Holesky is not supported: "deprecated as of September 2025" per
 | `consensus/live/deposit-contract-publicnode-mainnet.json` | `https://ethereum-beacon-api.publicnode.com` | `"1"`, address in lower case |
 | `consensus/live/deposit-contract-publicnode-sepolia.json` | `https://ethereum-sepolia-beacon-api.publicnode.com` | `"11155111"` |
 | `consensus/live/deposit-contract-lodestar-hoodi.json` | `https://lodestar-hoodi.chainsafe.io` | `"560048"`; **same deposit contract address as mainnet**, so only `chain_id` identifies the network |
+
+## Fork configuration
+
+### execution/eth-config-eip-example.json, execution/eth-config-eip-no-future.json — literal
+
+The two complete responses from
+[EIP-7910 L225-L377](https://github.com/ethereum/EIPs/blob/0c82d532192eca83ab5ce12b2a0d3e019c803066/EIPS/eip-7910.md?plain=1#L225-L377)
+(Hoodi with Prague scheduled, and "Without Future Fork Scheduled"), copied
+unchanged from the code blocks. The EIP defines `activationTime` as a JSON
+number in Unix seconds and `next`/`last` as `null` if no future fork is
+configured.
+
+### consensus/config-spec-example.json — literal
+
+The `example` of `data` in
+[beacon-APIs v4.0.0 apis/config/spec.yaml](https://github.com/ethereum/beacon-APIs/blob/88fc9402c6a1821b6e9ae4e3b8ae0a22f1141203/apis/config/spec.yaml),
+converted from YAML to JSON. It has no `*_FORK_EPOCH` keys, but a
+`BLOB_SCHEDULE` with entries at the Deneb and Electra epochs: such entries
+belong to hard forks, not to BPO forks. The same file says the response
+includes "constants for all hard forks known by the beacon node", so a
+missing `<NAME>_FORK_EPOCH` key means the client does not know the fork.
+
+### Live recordings (2026-11-24)
+
+Same method as above: the request x3f sends (`eth_config`,
+`GET /eth/v1/config/spec`) with curl, only the response body stored.
+
+| File | Endpoint | Notes |
+|---|---|---|
+| `execution/live/eth-config-publicnode-mainnet.json` | `https://ethereum-rpc.publicnode.com` | `current.activationTime` 1767747671 (BPO2), `next`/`last` `null` |
+| `execution/live/eth-config-publicnode-sepolia.json` | `https://ethereum-sepolia-rpc.publicnode.com` | 1791294816 (Glamsterdam); Reth 2.11.0, `blobSchedule` keys in alphabetical order |
+| `execution/live/eth-config-publicnode-hoodi.json` | `https://ethereum-hoodi-rpc.publicnode.com` | 1762955544 (BPO2): Geth 1.17.10 without the postponed Glamsterdam schedule |
+| `execution/live/eth-config-mevblocker-mainnet.json` | `https://rpc.mevblocker.io` | JSON-RPC error -32601: proxy does not offer `eth_config` |
+| `consensus/live/spec-publicnode-mainnet.json` | `https://ethereum-beacon-api.publicnode.com` | Lighthouse 8.3.3; `GLOAS` and `HEZE` far future (18446744073709551615) |
+| `consensus/live/spec-publicnode-sepolia.json` | `https://ethereum-sepolia-beacon-api.publicnode.com` | Lighthouse 8.3.3; `GLOAS_FORK_EPOCH` 353024 |
+| `consensus/live/spec-lodestar-hoodi.json` | `https://lodestar-hoodi.chainsafe.io` | Lodestar 1.51.0; `GLOAS` far future (postponed) |
+| `consensus/live/spec-nimbus-unstable-mainnet.json` | `http://unstable.mainnet.beacon-api.nimbus.team` | Nimbus 26.10.2; **no `HEZE_FORK_EPOCH` key** (fork not known yet) |
+
+All values are quoted integers, as the beacon-APIs spec requires. The
+`BLOB_SCHEDULE` entries of all four recordings are the BPO forks only.

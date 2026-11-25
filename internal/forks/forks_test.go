@@ -84,6 +84,8 @@ networks:
     genesis_time: 1606824023
     forks:
       - name: Fusaka
+        execution: Osaka
+        consensus: Fulu
         epoch: 411392
         timestamp: 1764798551
         min_versions: {geth: 1.16.7}
@@ -107,6 +109,7 @@ networks:
 		{"bad status", "        epoch:", "        status: cancelled\n        epoch:", `status "cancelled"`},
 		{"removed_in without postponed", "        epoch:", "        removed_in: {geth: 1.0.0}\n        epoch:", "only apply to postponed forks"},
 		{"bad date", "updated: 2026-11-24", "updated: yesterday", "updated: want a date"},
+		{"missing layer name", "        consensus: Fulu\n", "", "execution and consensus fork names are required"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -129,7 +132,7 @@ networks:
     genesis_time: 1606824023
     forks:
       - {name: BPO1, type: bpo, epoch: 412672, timestamp: 1765290071, sources: [https://a.example]}
-      - {name: Fusaka, epoch: 411392, timestamp: 1764798551, sources: [https://a.example]}
+      - {name: Fusaka, execution: Osaka, consensus: Fulu, epoch: 411392, timestamp: 1764798551, sources: [https://a.example]}
 `))
 	if err == nil || !strings.Contains(err.Error(), "must be in order of activation") {
 		t.Errorf("error = %v", err)

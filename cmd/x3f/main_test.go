@@ -163,33 +163,40 @@ func newMocks(t *testing.T) mocks {
 			"web3_clientVersion": fixture(t, "execution/geth.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
 			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
+			"eth_config":         fixture(t, "execution/live/eth-config-publicnode-mainnet.json"),
 		}),
 		gethIndexing: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/geth.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-geth-indexing.json"),
 			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
+			"eth_config":         fixture(t, "execution/live/eth-config-publicnode-mainnet.json"),
 		}),
 		// besu/v23.1.1-dev-ac23d311: a dev build, years behind.
+		// No eth_config: the release predates EIP-7910 (version fallback).
 		besuOutdated: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/besu.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
 			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
+			"eth_config":         fixture(t, "execution/live/eth-config-mevblocker-mainnet.json"),
 		}),
 		// Blocks web3_clientVersion but lets eth_syncing through.
 		proxyBlocksVersion: mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/error-method-not-found.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
 			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
+			"eth_config":         fixture(t, "execution/live/eth-config-publicnode-mainnet.json"),
 		}),
 		lighthouseSynced: mockClient(t, map[string][]byte{
 			"/eth/v1/node/version":            fixture(t, "consensus/lighthouse.json"),
 			"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
 			"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-publicnode-mainnet.json"),
+			"/eth/v1/config/spec":             fixture(t, "consensus/live/spec-publicnode-mainnet.json"),
 		}),
 		nimbusSynced: mockClient(t, map[string][]byte{
 			"/eth/v1/node/version":            fixture(t, "consensus/nimbus.json"),
 			"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
 			"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-publicnode-mainnet.json"),
+			"/eth/v1/config/spec":             fixture(t, "consensus/live/spec-publicnode-mainnet.json"),
 		}),
 		broken:   mockClient(t, nil), // 404 for everything
 		deadAddr: addr,
@@ -258,6 +265,7 @@ nodes:
 		"WARN  proxy-node execution: version query failed: web3_clientVersion: JSON-RPC error -32601",
 		// Real data: mainnet Fusaka lists Besu 25.11.0 as minimum.
 		"CRIT  outdated-node fork: Besu 23.1.1 is older than the minimum release for Fusaka (25.11.0): it cannot follow mainnet",
+		"NOTE  outdated-node fork: fork check of the execution client by version only: eth_config: JSON-RPC error -32601: The method eth_config does not exist/is not available",
 		"WARN  down-node network: consensus network detection failed: /eth/v1/config/deposit_contract: unexpected HTTP status 404 Not Found",
 		"Status: CRIT (1 OK, 2 WARN, 2 CRIT)",
 	} {
@@ -590,18 +598,21 @@ func TestRunProxyVersion(t *testing.T) {
 func TestRunNetwork(t *testing.T) {
 	gh := newFakeGitHub(t)
 	m := newMocks(t)
-	el := func(chainFixture string) string {
+	// network is the name in the live fixtures' file names.
+	el := func(network string) string {
 		return mockClient(t, map[string][]byte{
 			"web3_clientVersion": fixture(t, "execution/geth.json"),
 			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
-			"eth_chainId":        fixture(t, chainFixture),
+			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-"+network+".json"),
+			"eth_config":         fixture(t, "execution/live/eth-config-publicnode-"+network+".json"),
 		}).URL
 	}
-	cl := func(depositFixture string) string {
+	cl := func(deposit, spec string) string {
 		return mockClient(t, map[string][]byte{
 			"/eth/v1/node/version":            fixture(t, "consensus/lighthouse.json"),
 			"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
-			"/eth/v1/config/deposit_contract": fixture(t, depositFixture),
+			"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-"+deposit+".json"),
+			"/eth/v1/config/spec":             fixture(t, "consensus/live/spec-"+spec+".json"),
 		}).URL
 	}
 	// Synthetic devnet with chain ID 1337 (0x539).
@@ -622,19 +633,22 @@ func TestRunNetwork(t *testing.T) {
 		wantCode  int
 		wantCell  string
 		wantFinds []string
+		wantFork  string // FORK cell, if checked
 	}{
 		{
 			name:     "hoodi on both sides, as configured",
-			node:     "{name: n, execution_url: " + el("execution/live/chainid-publicnode-hoodi.json") + ", beacon_url: " + cl("consensus/live/deposit-contract-lodestar-hoodi.json") + ", network: hoodi}",
+			node:     "{name: n, execution_url: " + el("hoodi") + ", beacon_url: " + cl("lodestar-hoodi", "lodestar-hoodi") + ", network: hoodi}",
 			wantCode: exitOK,
 			wantCell: "hoodi",
 		},
 		{
 			name:      "execution and consensus on different networks",
-			node:      "{name: n, execution_url: " + el("execution/live/chainid-publicnode-sepolia.json") + ", beacon_url: " + cl("consensus/live/deposit-contract-publicnode-mainnet.json") + "}",
+			node:      "{name: n, execution_url: " + el("sepolia") + ", beacon_url: " + cl("publicnode-mainnet", "publicnode-mainnet") + "}",
 			wantCode:  exitCrit,
 			wantCell:  "EL sepolia / CL mainnet",
 			wantFinds: []string{"CRIT  n network: execution client is on sepolia, consensus client on mainnet"},
+			// No single schedule to compare against: no fork findings.
+			wantFork: "-",
 		},
 		{
 			name:     "on another network than configured",
@@ -663,8 +677,12 @@ func TestRunNetwork(t *testing.T) {
 			if code != tt.wantCode {
 				t.Errorf("exit %d, want %d\n%s", code, tt.wantCode, got)
 			}
-			if cells := rowCells(t, got, "n"); cells[2] != tt.wantCell {
+			cells := rowCells(t, got, "n")
+			if cells[2] != tt.wantCell {
 				t.Errorf("network cell = %q, want %q", cells[2], tt.wantCell)
+			}
+			if tt.wantFork != "" && (cells[7] != tt.wantFork || strings.Contains(got, " n fork:")) {
+				t.Errorf("fork cell = %q, want %q and no fork findings\n%s", cells[7], tt.wantFork, got)
 			}
 			for _, f := range tt.wantFinds {
 				if !strings.Contains(got, f) {
@@ -747,6 +765,8 @@ networks:
     genesis_time: %d
     forks:
       - name: Testfork
+        execution: Amsterdam
+        consensus: Gloas
         epoch: %d
         timestamp: %d
 %s        sources: [https://example.org/synthetic]
@@ -759,10 +779,22 @@ networks:
 }
 
 // Readiness for a scheduled fork, with synthetic schedules via -forks.
+//
+// The mocks answer neither eth_config nor /eth/v1/config/spec, so readiness
+// is judged by version (the fallback), with a note per layer.
 func TestRunForksScheduled(t *testing.T) {
 	gh := newFakeGitHub(t)
-	m := newMocks(t) // Geth 1.17.10 and Lighthouse 8.3.3 on mainnet
-	path := writeConfig(t, "nodes:\n  - {name: n, execution_url: "+m.gethSynced.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+	el := mockClient(t, map[string][]byte{ // Geth 1.17.10
+		"web3_clientVersion": fixture(t, "execution/geth.json"),
+		"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+		"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-mainnet.json"),
+	})
+	cl := mockClient(t, map[string][]byte{ // Lighthouse 8.3.3
+		"/eth/v1/node/version":            fixture(t, "consensus/lighthouse.json"),
+		"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
+		"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-publicnode-mainnet.json"),
+	})
+	path := writeConfig(t, "nodes:\n  - {name: n, execution_url: "+el.URL+", beacon_url: "+cl.URL+"}\n")
 	day := 24 * time.Hour
 
 	tests := []struct {
@@ -803,6 +835,84 @@ func TestRunForksScheduled(t *testing.T) {
 			if tt.wantFind != "" && !strings.Contains(got, tt.wantFind) {
 				t.Errorf("missing finding %q\n%s", tt.wantFind, got)
 			}
+			for _, note := range []string{
+				"NOTE  n fork: fork check of the execution client by version only: eth_config: unexpected HTTP status 404 Not Found",
+				"NOTE  n fork: fork check of the consensus client by version only: /eth/v1/config/spec: unexpected HTTP status 404 Not Found",
+			} {
+				if !strings.Contains(got, note) {
+					t.Errorf("missing note %q\n%s", note, got)
+				}
+			}
+		})
+	}
+}
+
+// Fork readiness from the node's own answer (eth_config and
+// /eth/v1/config/spec), with the built-in schedule on Hoodi.
+func TestRunForksNodeAnswer(t *testing.T) {
+	gh := newFakeGitHub(t)
+	hoodiConfig := fixture(t, "execution/live/eth-config-publicnode-hoodi.json")
+	// Derived from the live recording: current = the former Glamsterdam
+	// time, as a node with the postponed schedule would report it.
+	staleConfig := bytes.Replace(hoodiConfig, []byte(`"activationTime":1762955544`), []byte(`"activationTime":1793036568`), 1)
+	if bytes.Equal(staleConfig, hoodiConfig) {
+		t.Fatal("test bug: activationTime not found in fixture")
+	}
+	el := func(version string, config []byte) string {
+		return mockClient(t, map[string][]byte{
+			"web3_clientVersion": []byte(`{"jsonrpc":"2.0","id":1,"result":"` + version + `"}`),
+			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-hoodi.json"),
+			"eth_config":         config,
+		}).URL
+	}
+	cl := mockClient(t, map[string][]byte{
+		"/eth/v1/node/version":            fixture(t, "consensus/lodestar.json"),
+		"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
+		"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-lodestar-hoodi.json"),
+		"/eth/v1/config/spec":             fixture(t, "consensus/live/spec-lodestar-hoodi.json"),
+	}).URL
+
+	tests := []struct {
+		name     string
+		version  string // in the real Geth / dRPC format
+		config   []byte
+		wantCell string
+		wantFind []string
+		dontFind string
+	}{
+		{
+			// The node does not schedule the postponed fork, so the
+			// version range rule of 4b does not apply.
+			name: "geth 1.17.9 without the old schedule", version: "Geth/v1.17.9-stable-aaaaaaaa/linux-amd64/go1.27.3", config: hoodiConfig,
+			wantCell: "none scheduled", dontFind: "postponed",
+		},
+		{
+			name: "geth 1.17.9 with the old schedule", version: "Geth/v1.17.9-stable-aaaaaaaa/linux-amd64/go1.27.3", config: staleConfig,
+			wantCell: "EL has old Glamsterdam schedule",
+			wantFind: []string{"CRIT  n fork: Geth 1.17.9 still schedules the postponed Glamsterdam at its former time (2026-10-26 17:42 UTC, eth_config current); update to 1.17.10 or later"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := writeConfig(t, "nodes:\n  - {name: n, execution_url: "+el(tt.version, tt.config)+", beacon_url: "+cl+"}\n")
+			var out bytes.Buffer
+			run(context.Background(), []string{"-config", path, "-cache-dir", t.TempDir()}, &out, &out, testEnv(gh, now))
+			got := out.String()
+			if cells := rowCells(t, got, "n"); cells[7] != tt.wantCell {
+				t.Errorf("fork cell = %q, want %q\n%s", cells[7], tt.wantCell, got)
+			}
+			for _, want := range tt.wantFind {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q\n%s", want, got)
+				}
+			}
+			if tt.dontFind != "" && strings.Contains(got, tt.dontFind) {
+				t.Errorf("unexpected %q\n%s", tt.dontFind, got)
+			}
+			if strings.Contains(got, "by version only") {
+				t.Errorf("node answered, no fallback expected\n%s", got)
+			}
 		})
 	}
 }
@@ -830,8 +940,10 @@ func TestRunForksFileErrorsAndStaleness(t *testing.T) {
 		t.Errorf("bad file: exit %d\n%s", code, out)
 	}
 
+	// The mocks' eth_config/spec (live mainnet) do not schedule the
+	// synthetic Testfork, so the node is not ready: yellow, 99 days ahead.
 	code, out = run1("-forks", writeForks(t, "2026-09-01", 100*24*time.Hour, "{geth: 1.17.10, lighthouse: 8.3.3}"))
-	if code != exitOK || !strings.Contains(out, "NOTE  fork data last updated 2026-09-01 (84 days ago)") {
+	if code != exitWarn || !strings.Contains(out, "NOTE  fork data last updated 2026-09-01 (84 days ago)") {
 		t.Errorf("stale data: exit %d\n%s", code, out)
 	}
 }

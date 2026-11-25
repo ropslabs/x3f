@@ -39,7 +39,7 @@ Goal: for each configured node, report whether its clients are up to date, wheth
 cmd/x3f/              CLI entry point
 internal/config/      load and validate x3f.yaml
 internal/network/     known networks (mainnet, sepolia, hoodi) and chain IDs
-internal/ethereum/    query clients for version and sync status, parse version strings
+internal/ethereum/    query clients (version, sync status, chain ID, fork config), parse version strings
 internal/releases/    GitHub releases (with disk cache) and security advisories, version comparison
 internal/status/      green / yellow / red rules and findings
 internal/forks/       load and evaluate forks.yaml
