@@ -4,11 +4,82 @@
 
 x3f tells you what is running where, in which version, who owns it, and what needs attention next: known vulnerabilities, end-of-life dates and, for blockchain nodes, upcoming hard forks.
 
-> **Status:** early stage, not ready for production use. Everything below describes the plan for the first versions.
+> **Status:** early stage (v0.x). The Ethereum node check below works today; inventory, security advisories and alerts are planned. Flags and output may still change between 0.x releases.
 >
 > *An n-day is a known vulnerability that already has a fix. Many attacks don't need a zero-day, just a system where the existing patch was never applied. x3f finds those systems.*
 
 ---
+
+## Quick start
+
+x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, and whether they are ready for the next hard fork. It is a single binary that only reads from your nodes.
+
+### Install
+
+Download the archive for your system from the [releases page](https://github.com/ropslabs/x3f/releases) and check it against `SHA256SUMS`:
+
+```sh
+VERSION=0.1.0
+curl -LO https://github.com/ropslabs/x3f/releases/download/v$VERSION/x3f_${VERSION}_linux_amd64.tar.gz
+curl -LO https://github.com/ropslabs/x3f/releases/download/v$VERSION/SHA256SUMS
+sha256sum -c --ignore-missing SHA256SUMS
+tar -xzf x3f_${VERSION}_linux_amd64.tar.gz
+sudo install x3f_${VERSION}_linux_amd64/x3f /usr/local/bin/
+x3f -version
+```
+
+Archives exist for Linux and macOS (`tar.gz`) and Windows (`zip`), each for `amd64` and `arm64`. With the [GitHub CLI](https://cli.github.com) you can also check that an archive was built by this repository's release workflow: `gh attestation verify x3f_${VERSION}_linux_amd64.tar.gz --repo ropslabs/x3f`.
+
+The macOS binaries are not signed. If macOS refuses to start x3f, remove the quarantine flag: `xattr -d com.apple.quarantine x3f`.
+
+With Go 1.27.4 or newer you can install from source instead:
+
+```sh
+go install github.com/ropslabs/x3f/cmd/x3f@latest
+```
+
+### Configure
+
+Copy [`x3f.example.yaml`](x3f.example.yaml) to `x3f.yaml` and list your nodes:
+
+```yaml
+nodes:
+  - name: mainnet-1
+    execution_url: http://localhost:8545   # execution client JSON-RPC (HTTP)
+    beacon_url: http://localhost:5052      # consensus client beacon API
+    network: mainnet                       # optional: expected network
+```
+
+x3f needs HTTP access to these methods, all read-only:
+
+- execution client: `web3_clientVersion`, `eth_syncing`, `eth_chainId`, `eth_config`
+- consensus client: `GET /eth/v1/node/version`, `/eth/v1/node/syncing`, `/eth/v1/config/deposit_contract`, `/eth/v1/config/spec`
+
+Point x3f directly at each node, not at a proxy or load balancer (see [below](#fork-readiness)). Run it where the node APIs are reachable anyway, for example on the node host or in the same private network; do not open the APIs to the internet for x3f.
+
+### Run
+
+```sh
+x3f -config x3f.yaml
+```
+
+x3f prints a table, the findings and a summary, and exits with `0` (OK), `1` (warning), `2` (critical) or `3` (x3f could not run), so scripts and monitoring systems can act on the result (see [Exit codes](#exit-codes)). To check every 15 minutes with cron and keep the last result:
+
+```
+*/15 * * * * /usr/local/bin/x3f -config /etc/x3f/x3f.yaml > /var/lib/x3f/last.txt 2>&1
+```
+
+x3f asks GitHub for the latest releases and caches the answers for an hour. Without a token GitHub allows 60 requests per hour; with many different clients or frequent runs, set `GITHUB_TOKEN` (any token works, it needs no permissions).
+
+### Supported
+
+| | |
+|---|---|
+| Execution clients | Geth, Reth, Nethermind, Erigon, Besu, Ethrex |
+| Consensus clients | Lighthouse, Prysm, Teku, Nimbus, Lodestar, Grandine |
+| Networks | mainnet, Sepolia, Hoodi |
+
+The fork schedule is built into x3f. To get new fork dates, update x3f; x3f adds a note when its fork data is older than 30 days. Until a new release is out, you can pass your own schedule with `-forks` (same format as [`internal/forks/forks.yaml`](internal/forks/forks.yaml)).
 
 ## Why
 
@@ -41,16 +112,11 @@ Blockchain node operators have the same problem plus hard deadlines. If a node i
 
 Built with solo stakers and small validator teams in mind, people who run nodes without an ops team behind them.
 
-## Usage (preview)
+## Usage
 
 > What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release and fork readiness (asked from the node itself, with the announced client releases as fallback). Security advisories and alerts are not built yet.
 
-Build the binary (requires Go) and describe your nodes in `x3f.yaml` (see [`x3f.example.yaml`](x3f.example.yaml)):
-
-```sh
-go build -o x3f ./cmd/x3f
-./x3f -config x3f.yaml
-```
+Example output:
 
 ```
 STATUS  NODE       NETWORK  EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC                         FORK
@@ -94,6 +160,9 @@ If GitHub is unreachable, cached release data younger than 7 days is used with a
 | `-cache-ttl` | `1h` | how long cached data is used without asking GitHub |
 | `-forks` | built in | fork schedule file to use instead of the built-in one |
 | `-fork-critical-days` | `14` | days before a fork from which a client that is not ready turns red |
+| `-version` | | print the version and exit |
+
+### Fork readiness
 
 The fork schedule is built into the binary ([`internal/forks/forks.yaml`](internal/forks/forks.yaml)): dates and client releases per network, taken only from official announcements, each with its source. x3f notes when the built-in data is older than 30 days.
 
@@ -101,11 +170,13 @@ For fork readiness x3f asks the node itself: the execution client via `eth_confi
 
 Point x3f directly at each node, not at a proxy or load balancer: behind one, every request may be answered by a different node, so version, sync status and fork schedule would not describe the same machine. Versions that look like a proxy (newer than every known release) are reported in yellow as a safety net.
 
-Environment: `GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `NO_COLOR` disables colors.
+### Environment
+
+`GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `NO_COLOR` disables colors.
 
 ### Exit codes
 
-x3f follows the [Nagios plugin convention](https://nagios-plugins.org/doc/guidelines.html), so it can be used as a monitoring check directly:
+The exit codes follow the [Nagios plugin convention](https://nagios-plugins.org/doc/guidelines.html):
 
 | Code | Meaning |
 |---|---|
@@ -113,6 +184,8 @@ x3f follows the [Nagios plugin convention](https://nagios-plugins.org/doc/guidel
 | `1` | WARNING: at least one yellow finding |
 | `2` | CRITICAL: at least one red finding |
 | `3` | UNKNOWN: x3f could not run (invalid flags or config) |
+
+The output itself is not yet in the Nagios plugin format: Nagios shows the first output line as the check result, and for x3f that is currently the table header. A dedicated Nagios output format is planned for a later release.
 
 ## Design principles
 
@@ -141,4 +214,4 @@ The project is just getting started. Ideas, issues and feedback are very welcome
 
 ## License
 
-To be decided (an OSI-approved open source license).
+[Apache License 2.0](LICENSE)

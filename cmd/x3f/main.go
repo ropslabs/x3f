@@ -21,7 +21,7 @@ import (
 )
 
 // Exit codes follow the Nagios plugin convention, so monitoring systems can
-// use x3f as a check directly.
+// act on the result. (The output is not in the Nagios plugin format yet.)
 const (
 	exitOK      = 0 // everything green
 	exitWarn    = 1 // at least one yellow
@@ -112,12 +112,17 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	cacheTTL := fs.Duration("cache-ttl", time.Hour, "how long cached GitHub data is used without asking GitHub")
 	forksPath := fs.String("forks", "", "fork schedule file to use instead of the built-in one")
 	forkCriticalDays := fs.Int("fork-critical-days", 14, "days before a fork from which a client that is not ready turns red (if a ready release exists)")
+	showVersion := fs.Bool("version", false, "print the version and exit")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return exitOK // -help was requested; usage is already printed
 		}
 		return exitUnknown // the flag package already printed the error
+	}
+	if *showVersion {
+		fmt.Fprintln(stdout, versionText())
+		return exitOK
 	}
 
 	fail := func(format string, a ...any) int {
@@ -154,6 +159,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		CacheDir: *cacheDir,
 		TTL:      *cacheTTL,
 		Now:      e.now,
+		// GitHub asks API clients to send a User-Agent naming the tool.
+		UserAgent: "x3f/" + buildVersion(),
 	}
 	rel := fetchReleases(ctx, src, results, *timeout)
 	refreshIfAhead(ctx, src, results, rel, *timeout)

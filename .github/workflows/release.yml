@@ -1,0 +1,54 @@
+name: Release
+
+# A tag like v0.1.0 builds the release. Tags with a hyphen (v0.2.0-rc.1)
+# become GitHub pre-releases.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # create the GitHub release
+      id-token: write          # sign the attestations (Sigstore)
+      attestations: write      # store the attestations
+      artifact-metadata: write # storage record for the attestations
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+          # No build cache for releases: build from a clean state.
+          cache: false
+
+      - name: Check
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -race ./...
+
+      - name: Build
+        run: scripts/build-release.sh "$GITHUB_REF_NAME"
+
+      - name: Attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then
+            flags+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" "${flags[@]}" \
+            --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes \
+            dist/*.tar.gz dist/*.zip dist/SHA256SUMS

@@ -988,3 +988,18 @@ func TestRunEthrex(t *testing.T) {
 		t.Errorf("GitHub requests = %v", gh.requests)
 	}
 }
+
+func TestVersionFlag(t *testing.T) {
+	var out bytes.Buffer
+	code := run(context.Background(), []string{"-version"}, &out, &out, env{})
+	if code != exitOK || !regexp.MustCompile(`^x3f \S+ \(commit \S+, go\S+, \w+/\w+\)\n$`).MatchString(out.String()) {
+		t.Errorf("exit %d, output %q", code, out.String())
+	}
+
+	saved := version
+	t.Cleanup(func() { version = saved })
+	version = "v0.1.0" // as set by -ldflags "-X main.version=v0.1.0"
+	if got := buildVersion(); got != "v0.1.0" {
+		t.Errorf("buildVersion = %q", got)
+	}
+}

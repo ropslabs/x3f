@@ -22,6 +22,7 @@ type fakeGitHub struct {
 	requests atomic.Int32 // atomic: the handler runs in another goroutine
 	lastAuth atomic.Value
 	lastINM  atomic.Value
+	lastUA   atomic.Value
 	status   atomic.Int32
 }
 
@@ -36,6 +37,7 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 		f.requests.Add(1)
 		f.lastAuth.Store(r.Header.Get("Authorization"))
 		f.lastINM.Store(r.Header.Get("If-None-Match"))
+		f.lastUA.Store(r.Header.Get("User-Agent"))
 		if r.URL.Path != "/repos/ethereum/go-ethereum/releases" || r.URL.Query().Get("per_page") != "100" {
 			http.NotFound(w, r)
 			return
@@ -196,6 +198,21 @@ func TestReleasesWithoutTokenSendsNoAuthorization(t *testing.T) {
 	}
 	if got := f.lastAuth.Load(); got != "" {
 		t.Errorf("Authorization header = %q, want none", got)
+	}
+}
+
+func TestReleasesUserAgent(t *testing.T) {
+	f := newFakeGitHub(t)
+	s := newSource(t, f, &clock{t: time.Now()})
+	s.CacheDir = ""
+	for _, tt := range []struct{ set, want string }{{"", "x3f"}, {"x3f/v0.1.0", "x3f/v0.1.0"}} {
+		s.UserAgent = tt.set
+		if _, err := s.Releases(context.Background(), geth); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.lastUA.Load(); got != tt.want {
+			t.Errorf("User-Agent = %q, want %q", got, tt.want)
+		}
 	}
 }
 

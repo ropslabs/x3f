@@ -45,6 +45,8 @@ internal/status/      green / yellow / red rules and findings
 internal/forks/       load and evaluate forks.yaml
 internal/notify/      Telegram
 internal/*/testdata/  per-package test fixtures (e.g. recorded API responses), with their source noted
+scripts/              release build (build-release.sh)
+.github/workflows/    CI (gofmt, vet, test -race, build) and release
 ```
 
 ## Principles
@@ -59,6 +61,12 @@ internal/*/testdata/  per-package test fixtures (e.g. recorded API responses), w
 - Table-driven tests, especially for version-string parsing (each client formats its version differently).
 - Development starts against mock servers; a real testnet node comes later.
 - Run `gofmt`, `go vet` and `go test ./...` before considering a step done.
+
+## Releases
+
+- Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`: checks, `scripts/build-release.sh` (6 targets, archives, `SHA256SUMS`), GitHub artifact attestations, GitHub release. Tags with a hyphen (`v0.2.0-rc.1`) become pre-releases.
+- Before tagging: CI green on main, `forks.yaml` checked against the official sources (see below).
+- Actions are pinned to commit SHAs; update them together with the version comment.
 
 ## Updating forks.yaml
 

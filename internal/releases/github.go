@@ -42,6 +42,8 @@ type Source struct {
 	TTL time.Duration
 	// Now returns the current time; nil means time.Now. Tests override it.
 	Now func() time.Time
+	// UserAgent is sent to GitHub; empty means "x3f".
+	UserAgent string
 }
 
 // Result is the release list of one repository.
@@ -122,7 +124,11 @@ func (s *Source) fetch(ctx context.Context, repo Repo, etag string) (rels []Rele
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	req.Header.Set("User-Agent", "x3f")
+	ua := s.UserAgent
+	if ua == "" {
+		ua = "x3f"
+	}
+	req.Header.Set("User-Agent", ua)
 	if s.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+s.Token)
 	}
