@@ -90,3 +90,6 @@ scripts/              release build (build-release.sh)
 4. `forks.yaml` and fork-readiness check
 5. GitHub security advisories
 6. Telegram alerts
+7. Prometheus metrics (e.g. a file for the node_exporter textfile collector)
+
+Steps 1–4 are done (released as v0.1.0). Later, not scheduled yet: Nagios output format (with the company module; the first audience, solo stakers, uses Prometheus, Grafana and Telegram) and the forkId check.
