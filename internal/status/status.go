@@ -49,6 +49,24 @@ func (l Level) String() string {
 	}
 }
 
+// MarshalText implements encoding.TextMarshaler, so a Level is stored as
+// "OK", "WARN" or "CRIT" in JSON (also as a map value) instead of a number.
+func (l Level) MarshalText() ([]byte, error) {
+	return []byte(l.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler, the reverse of
+// MarshalText.
+func (l *Level) UnmarshalText(b []byte) error {
+	for _, c := range []Level{OK, Warn, Crit} {
+		if string(b) == c.String() {
+			*l = c
+			return nil
+		}
+	}
+	return fmt.Errorf("unknown level %q", b)
+}
+
 // Finding is one reason behind an assessment. A finding with level OK is a
 // note: worth showing, but it does not change the status.
 type Finding struct {

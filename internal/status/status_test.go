@@ -311,3 +311,20 @@ func TestAssessNetwork(t *testing.T) {
 		})
 	}
 }
+
+func TestLevelText(t *testing.T) {
+	for _, l := range []Level{OK, Warn, Crit} {
+		b, err := l.MarshalText()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got Level
+		if err := got.UnmarshalText(b); err != nil || got != l {
+			t.Errorf("%v: round trip gave %v, %v", l, got, err)
+		}
+	}
+	var l Level
+	if err := l.UnmarshalText([]byte("warn")); err == nil {
+		t.Error("lowercase level accepted")
+	}
+}
