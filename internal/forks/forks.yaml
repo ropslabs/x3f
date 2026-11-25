@@ -1,0 +1,188 @@
+# x3f fork schedule: which network upgrades are active, scheduled or
+# postponed on each network, and which client releases support them.
+#
+# Rules for this file (see CLAUDE.md and internal/forks/SOURCES.md):
+# - Dates, epochs, timestamps and client versions come only from official
+#   sources: the Ethereum Foundation blog, ethereum/pm, the specs. Every fork
+#   lists its sources.
+# - The eth-clients/{mainnet,sepolia,hoodi} network configs are a cross-check
+#   only. Deviations are reported, never adopted automatically. Last check:
+#   2026-11-24, no deviations (see SOURCES.md).
+# - x3f validates on load that every timestamp equals
+#   genesis_time + epoch * 32 slots * 12 s, which catches typos.
+#
+# min_versions: the releases an announcement lists for a fork. Older releases
+# cannot follow the chain once the fork is active.
+# Postponed forks keep their former schedule. scheduled_in / removed_in name
+# the releases that contained the old schedule and the first ones that
+# removed it again.
+#
+# Ethrex releases are listed in the announcements but not here yet; x3f does
+# not support Ethrex so far.
+
+updated: 2026-11-24
+
+networks:
+  mainnet:
+    chain_id: 1
+    genesis_time: 1606824023
+    forks:
+      - name: Fusaka
+        execution: Osaka
+        consensus: Fulu
+        epoch: 411392
+        # Not stated in the announcement; derived from the stated slot
+        # 13,164,544: 1606824023 + 13164544 * 12. Matches osakaTime in
+        # eth-clients/mainnet.
+        timestamp: 1764798551
+        min_versions:
+          geth: 1.16.7
+          reth: 1.9.3
+          nethermind: 1.35.3
+          erigon: 3.3.0
+          besu: 25.11.0
+          lighthouse: 8.0.1
+          prysm: 7.0.0
+          teku: 25.11.1
+          nimbus: 25.11.1
+          lodestar: 1.36.0
+          grandine: 2.0.0
+        sources:
+          - https://blog.ethereum.org/2025/11/06/fusaka-mainnet-announcement
+      - name: BPO1
+        type: bpo
+        epoch: 412672
+        timestamp: 1765290071
+        sources:
+          - https://blog.ethereum.org/2025/11/06/fusaka-mainnet-announcement
+      - name: BPO2
+        type: bpo
+        epoch: 419072
+        timestamp: 1767747671
+        sources:
+          - https://blog.ethereum.org/2025/11/06/fusaka-mainnet-announcement
+      # Glamsterdam: no mainnet date yet ("Hoodi and mainnet activation dates
+      # have not yet been decided", 2026-09-17; unchanged on 2026-10-22).
+
+  sepolia:
+    chain_id: 11155111
+    genesis_time: 1655733600
+    forks:
+      - name: Fusaka
+        execution: Osaka
+        consensus: Fulu
+        # The announcement states slot 8,724,480 = epoch 272640.
+        epoch: 272640
+        timestamp: 1760427360
+        min_versions: &fusaka-testnets
+          geth: 1.16.5
+          reth: 1.8.2
+          nethermind: 1.35.0
+          erigon: 3.2.1
+          besu: 25.10.0
+          lighthouse: 8.0.0-rc.2
+          prysm: 6.1.3
+          teku: 25.10.0
+          nimbus: 25.9.2
+          lodestar: 1.35.0
+          grandine: 2.0.0.rc0
+        sources:
+          - https://blog.ethereum.org/2025/09/26/fusaka-testnet-announcement
+      - name: BPO1
+        type: bpo
+        epoch: 274176
+        timestamp: 1761017184
+        sources:
+          - https://blog.ethereum.org/2025/09/26/fusaka-testnet-announcement
+      - name: BPO2
+        type: bpo
+        epoch: 275712
+        timestamp: 1761607008
+        sources:
+          - https://blog.ethereum.org/2025/09/26/fusaka-testnet-announcement
+      - name: Glamsterdam
+        execution: Amsterdam
+        consensus: Gloas
+        epoch: 353024
+        timestamp: 1791294816
+        min_versions:
+          geth: 1.17.7
+          reth: 2.7.0
+          nethermind: 2.1.0
+          erigon: 3.7.1
+          besu: 26.9.0
+          lighthouse: 8.3.0-rc.0
+          # Prysm 7.2.0 also supports the fork but defaults to a 60M gas
+          # limit afterwards; the announcement lists 7.2.1.
+          prysm: 7.2.1
+          teku: 26.9.1
+          nimbus: 26.10.0
+          lodestar: 1.49.0
+          grandine: 3.0.0-rc.0
+        sources:
+          - https://blog.ethereum.org/2026/09/17/glamsterdam-testnet-announcement
+
+  hoodi:
+    chain_id: 560048
+    genesis_time: 1742213400
+    forks:
+      - name: Fusaka
+        execution: Osaka
+        consensus: Fulu
+        # The announcement states slot 1,622,016 = epoch 50688.
+        epoch: 50688
+        timestamp: 1761677592
+        min_versions: *fusaka-testnets
+        sources:
+          - https://blog.ethereum.org/2025/09/26/fusaka-testnet-announcement
+      - name: BPO1
+        type: bpo
+        epoch: 52480
+        timestamp: 1762365720
+        sources:
+          - https://blog.ethereum.org/2025/09/26/fusaka-testnet-announcement
+      - name: BPO2
+        type: bpo
+        epoch: 54016
+        timestamp: 1762955544
+        sources:
+          - https://blog.ethereum.org/2025/09/26/fusaka-testnet-announcement
+      - name: Glamsterdam
+        execution: Amsterdam
+        consensus: Gloas
+        status: postponed
+        # Former schedule: 2026-10-26 17:42:48 UTC. Postponed on 2026-10-22
+        # (ACDE #248), no new date.
+        epoch: 132352
+        timestamp: 1793036568
+        # Releases listed for the (now cancelled) activation. Earlier
+        # releases may contain the schedule as well; the announcement does
+        # not say.
+        scheduled_in:
+          geth: 1.17.9
+          reth: 2.8.0
+          nethermind: 2.2.0
+          erigon: 3.8.0
+          besu: 26.10.0
+          lighthouse: 8.3.1
+          prysm: 7.3.0
+          teku: 26.10.1
+          nimbus: 26.10.1
+          lodestar: 1.50.0
+          grandine: 3.0.0-rc.1
+        # Releases confirmed to have removed the October 26 activation.
+        removed_in:
+          geth: 1.17.10
+          reth: 2.8.1
+          nethermind: 2.2.1
+          erigon: 3.8.1
+          besu: 26.10.1
+          lighthouse: 8.3.2
+          prysm: 7.3.1
+          teku: 26.10.2
+          nimbus: 26.10.2
+          lodestar: 1.50.1
+          grandine: 3.0.0-rc.2
+        sources:
+          - https://blog.ethereum.org/2026/10/16/glamsterdam-hoodi-announcement
+          - https://blog.ethereum.org/2026/10/22/glamsterdam-hoodi-delay

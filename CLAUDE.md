@@ -60,6 +60,13 @@ internal/*/testdata/  per-package test fixtures (e.g. recorded API responses), w
 - Development starts against mock servers; a real testnet node comes later.
 - Run `gofmt`, `go vet` and `go test ./...` before considering a step done.
 
+## Updating forks.yaml
+
+- Data only from official sources (EF blog, ethereum/pm, specs); read the original page text, not a summary. Add the source to the fork entry and to `internal/forks/SOURCES.md`.
+- The loader checks `timestamp = genesis_time + epoch × 384`; a failure is almost always a typo.
+- Refresh the eth-clients snapshot in `internal/forks/testdata/eth-clients` and run `TestCrossCheckEthClients`. Report deviations to the maintainer; never copy values from eth-clients.
+- Bump `updated:`.
+
 ## Conventions
 
 - Code, comments, commit messages and docs in English.

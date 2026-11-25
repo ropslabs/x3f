@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -234,12 +235,12 @@ nodes:
 		node string
 		want []string
 	}{
-		{"NODE", []string{"STATUS", "NODE", "NETWORK", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC"}},
-		{"good-node", []string{"OK", "good-node", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced"}},
-		{"warn-node", []string{"WARN", "warn-node", "mainnet", "Geth 1.17.10 (stable)", "indexing", "Lighthouse 8.3.3", "synced"}},
-		{"outdated-node", []string{"CRIT", "outdated-node", "mainnet", "Besu 23.1.1 (dev) -> 26.11.2", "synced", "Nimbus 26.10.2 (stateofus)", "synced"}},
-		{"down-node", []string{"CRIT", "down-node", "?", "ERROR", "-", "ERROR", "ERROR"}},
-		{"proxy-node", []string{"WARN", "proxy-node", "mainnet", "ERROR", "synced", "Lighthouse 8.3.3", "synced"}},
+		{"NODE", []string{"STATUS", "NODE", "NETWORK", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC", "FORK"}},
+		{"good-node", []string{"OK", "good-node", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled"}},
+		{"warn-node", []string{"WARN", "warn-node", "mainnet", "Geth 1.17.10 (stable)", "indexing", "Lighthouse 8.3.3", "synced", "none scheduled"}},
+		{"outdated-node", []string{"CRIT", "outdated-node", "mainnet", "Besu 23.1.1 (dev) -> 26.11.2", "synced", "Nimbus 26.10.2 (stateofus)", "synced", "EL below Fusaka minimum"}},
+		{"down-node", []string{"CRIT", "down-node", "?", "ERROR", "-", "ERROR", "ERROR", "-"}},
+		{"proxy-node", []string{"WARN", "proxy-node", "mainnet", "ERROR", "synced", "Lighthouse 8.3.3", "synced", "none scheduled"}},
 	}
 	for _, r := range rows {
 		if cells := rowCells(t, got, r.node); !slices.Equal(cells, r.want) {
@@ -255,6 +256,8 @@ nodes:
 		"WARN  down-node consensus: version query failed: /eth/v1/node/version: unexpected HTTP status 404",
 		"WARN  down-node consensus sync: sync status query failed",
 		"WARN  proxy-node execution: version query failed: web3_clientVersion: JSON-RPC error -32601",
+		// Real data: mainnet Fusaka lists Besu 25.11.0 as minimum.
+		"CRIT  outdated-node fork: Besu 23.1.1 is older than the minimum release for Fusaka (25.11.0): it cannot follow mainnet",
 		"WARN  down-node network: consensus network detection failed: /eth/v1/config/deposit_contract: unexpected HTTP status 404 Not Found",
 		"Status: CRIT (1 OK, 2 WARN, 2 CRIT)",
 	} {
@@ -669,5 +672,166 @@ func TestRunNetwork(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Fork readiness with the built-in schedule (real data, see
+// internal/forks/SOURCES.md): Glamsterdam on Hoodi was postponed on
+// 2026-10-22; go-ethereum 1.17.9 contained the old schedule, 1.17.10
+// removed it.
+func TestRunForksBuiltIn(t *testing.T) {
+	gh := newFakeGitHub(t)
+	gethVersion := func(v string) string {
+		return mockClient(t, map[string][]byte{
+			// Synthetic version strings in the real Geth format.
+			"web3_clientVersion": []byte(`{"jsonrpc":"2.0","id":1,"result":"Geth/v` + v + `-stable-1df30b18/linux-amd64/go1.27.3"}`),
+			"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+			"eth_chainId":        fixture(t, "execution/live/chainid-publicnode-hoodi.json"),
+		}).URL
+	}
+	lodestarHoodi := mockClient(t, map[string][]byte{
+		"/eth/v1/node/version":            fixture(t, "consensus/lodestar.json"),
+		"/eth/v1/node/syncing":            fixture(t, "consensus/syncing-synced.json"),
+		"/eth/v1/config/deposit_contract": fixture(t, "consensus/live/deposit-contract-lodestar-hoodi.json"),
+	}).URL
+
+	tests := []struct {
+		version  string
+		wantCode int
+		wantCell string
+		wantFind string
+	}{
+		{"1.17.8", exitCrit, "none scheduled", ""}, // outdated (grace), but no old schedule per the data
+		{"1.17.9", exitCrit, "EL has old Glamsterdam schedule",
+			"CRIT  n fork: Geth 1.17.9 still contains the postponed Glamsterdam schedule (2026-10-26 17:42 UTC); update to 1.17.10 or later; the former activation time has passed, so the node has most likely left the chain"},
+		{"1.17.10", exitOK, "none scheduled", ""},
+		{"1.16.4", exitCrit, "EL below Fusaka minimum",
+			"CRIT  n fork: Geth 1.16.4 is older than the minimum release for Fusaka (1.16.5): it cannot follow hoodi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.version, func(t *testing.T) {
+			path := writeConfig(t, "nodes:\n  - {name: n, execution_url: "+gethVersion(tt.version)+", beacon_url: "+lodestarHoodi+"}\n")
+			var out bytes.Buffer
+			code := run(context.Background(), []string{"-config", path, "-cache-dir", t.TempDir()}, &out, &out, testEnv(gh, now))
+			got := out.String()
+			if code != tt.wantCode {
+				t.Errorf("exit %d, want %d\n%s", code, tt.wantCode, got)
+			}
+			if cells := rowCells(t, got, "n"); cells[7] != tt.wantCell {
+				t.Errorf("fork cell = %q, want %q", cells[7], tt.wantCell)
+			}
+			if tt.wantFind != "" && !strings.Contains(got, tt.wantFind) {
+				t.Errorf("missing finding %q\n%s", tt.wantFind, got)
+			}
+		})
+	}
+}
+
+// writeForks writes a synthetic fork schedule for mainnet with one fork
+// "Testfork" that activates `in` after now. minVersions is a YAML flow map
+// such as "{geth: 1.18.0}" or "". Epoch and timestamp are computed so that
+// the loader's consistency check passes.
+func writeForks(t *testing.T, updated string, in time.Duration, minVersions string) string {
+	t.Helper()
+	const genesis = 1606824023 // mainnet
+	epoch := (now.Add(in).Unix() - genesis) / 384
+	ts := genesis + epoch*384
+	minLine := ""
+	if minVersions != "" {
+		minLine = "        min_versions: " + minVersions + "\n"
+	}
+	yaml := fmt.Sprintf(`updated: %s
+networks:
+  mainnet:
+    chain_id: 1
+    genesis_time: %d
+    forks:
+      - name: Testfork
+        epoch: %d
+        timestamp: %d
+%s        sources: [https://example.org/synthetic]
+`, updated, genesis, epoch, ts, minLine)
+	path := filepath.Join(t.TempDir(), "forks.yaml")
+	if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// Readiness for a scheduled fork, with synthetic schedules via -forks.
+func TestRunForksScheduled(t *testing.T) {
+	gh := newFakeGitHub(t)
+	m := newMocks(t) // Geth 1.17.10 and Lighthouse 8.3.3 on mainnet
+	path := writeConfig(t, "nodes:\n  - {name: n, execution_url: "+m.gethSynced.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+	day := 24 * time.Hour
+
+	tests := []struct {
+		name     string
+		in       time.Duration
+		minVers  string
+		extra    []string
+		wantCode int
+		wantCell string
+		wantFind string
+	}{
+		{"ready", 6 * day, "{geth: 1.17.10, lighthouse: 8.3.0-rc.0}", nil, exitOK, "Testfork in 5 days: ready",
+			""},
+		{"only CL release missing", 6 * day, "{geth: 1.17.10}", nil, exitWarn, "Testfork in 5 days: CL waiting for release",
+			"WARN  n fork: Testfork on mainnet in 5 days: no Lighthouse release announced yet (waiting for client release)"},
+		{"not ready, far away", 20 * day, "{geth: 1.18.0}", nil, exitWarn, "Testfork in 19 days: EL not ready, CL waiting for release",
+			"WARN  n fork: Geth 1.17.10 is not ready for Testfork on mainnet"},
+		{"not ready, close", 6 * day, "{geth: 1.18.0}", nil, exitCrit, "Testfork in 5 days: EL not ready, CL waiting for release",
+			"CRIT  n fork: Geth 1.17.10 is not ready for Testfork on mainnet"},
+		{"no release yet stays yellow", 2 * day, "", nil, exitWarn, "Testfork in 1 day: EL waiting for release, CL waiting for release",
+			"WARN  n fork: Testfork on mainnet in 1 day: no Geth release announced yet (waiting for client release)"},
+		{"threshold flag", 6 * day, "{geth: 1.18.0}", []string{"-fork-critical-days", "3"}, exitWarn, "Testfork in 5 days: EL not ready, CL waiting for release",
+			"WARN  n fork: Geth 1.17.10 is not ready"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			forksPath := writeForks(t, "2026-11-24", tt.in, tt.minVers)
+			args := append([]string{"-config", path, "-cache-dir", t.TempDir(), "-forks", forksPath}, tt.extra...)
+			var out bytes.Buffer
+			code := run(context.Background(), args, &out, &out, testEnv(gh, now))
+			got := out.String()
+			if code != tt.wantCode {
+				t.Errorf("exit %d, want %d\n%s", code, tt.wantCode, got)
+			}
+			if cells := rowCells(t, got, "n"); cells[7] != tt.wantCell {
+				t.Errorf("fork cell = %q, want %q", cells[7], tt.wantCell)
+			}
+			if tt.wantFind != "" && !strings.Contains(got, tt.wantFind) {
+				t.Errorf("missing finding %q\n%s", tt.wantFind, got)
+			}
+		})
+	}
+}
+
+func TestRunForksFileErrorsAndStaleness(t *testing.T) {
+	gh := newFakeGitHub(t)
+	m := newMocks(t)
+	path := writeConfig(t, "nodes:\n  - {name: n, execution_url: "+m.gethSynced.URL+", beacon_url: "+m.lighthouseSynced.URL+"}\n")
+
+	run1 := func(args ...string) (int, string) {
+		var out bytes.Buffer
+		code := run(context.Background(), append([]string{"-config", path, "-cache-dir", t.TempDir()}, args...), &out, &out, testEnv(gh, now))
+		return code, out.String()
+	}
+
+	code, out := run1("-forks", filepath.Join(t.TempDir(), "missing.yaml"))
+	if code != exitUnknown || !strings.Contains(out, "read forks file") {
+		t.Errorf("missing file: exit %d\n%s", code, out)
+	}
+
+	bad := filepath.Join(t.TempDir(), "bad.yaml")
+	os.WriteFile(bad, []byte("updated: 2026-11-24\nnetworks:\n  holesky: {chain_id: 17000, genesis_time: 1, forks: []}\n"), 0o600)
+	code, out = run1("-forks", bad)
+	if code != exitUnknown || !strings.Contains(out, `network "holesky" is not one of`) {
+		t.Errorf("bad file: exit %d\n%s", code, out)
+	}
+
+	code, out = run1("-forks", writeForks(t, "2026-09-01", 100*24*time.Hour, "{geth: 1.17.10, lighthouse: 8.3.3}"))
+	if code != exitOK || !strings.Contains(out, "NOTE  fork data last updated 2026-09-01 (84 days ago)") {
+		t.Errorf("stale data: exit %d\n%s", code, out)
 	}
 }

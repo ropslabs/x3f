@@ -15,6 +15,7 @@ import (
 
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/forks"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
 )
@@ -31,8 +32,9 @@ const (
 const usageText = `Usage: x3f [flags]
 
 x3f queries the Ethereum nodes listed in the config file (read-only) and
-reports client versions, sync status and whether the clients are behind
-their latest stable GitHub release.
+reports the network, client versions, sync status, whether the clients are
+behind their latest stable GitHub release and whether they are ready for
+the next fork (built-in fork schedule, see -forks).
 
 Flags:
 `
@@ -105,6 +107,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	graceDays := fs.Int("grace-days", 30, "days a client may lag behind the latest stable release before it turns red")
 	cacheDir := fs.String("cache-dir", defaultCacheDir(), "directory for cached GitHub data (empty disables the cache)")
 	cacheTTL := fs.Duration("cache-ttl", time.Hour, "how long cached GitHub data is used without asking GitHub")
+	forksPath := fs.String("forks", "", "fork schedule file to use instead of the built-in one")
+	forkCriticalDays := fs.Int("fork-critical-days", 14, "days before a fork from which a client that is not ready turns red (if a ready release exists)")
 
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -126,6 +130,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	if *cacheTTL < 0 {
 		return fail("-cache-ttl must not be negative")
 	}
+	if *forkCriticalDays < 0 {
+		return fail("-fork-critical-days must not be negative")
+	}
+	schedule, err := loadSchedule(*forksPath)
+	if err != nil {
+		return fail("%v", err)
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -144,9 +155,19 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	rel := fetchReleases(ctx, src, results, *timeout)
 	refreshIfAhead(ctx, src, results, rel, *timeout)
 
-	grace := time.Duration(*graceDays) * 24 * time.Hour
-	rows, overall := assess(results, rel, e.now(), grace)
-	if err := printReport(stdout, rows, overall, e.color); err != nil {
+	day := 24 * time.Hour
+	now := e.now()
+	rows, overall := assess(results, rel, assessParams{
+		now:            now,
+		grace:          time.Duration(*graceDays) * day,
+		schedule:       schedule,
+		forkCriticalIn: time.Duration(*forkCriticalDays) * day,
+	})
+	var global []status.Finding
+	if f, ok := status.ForkDataNote(schedule, now); ok {
+		global = append(global, f)
+	}
+	if err := printReport(stdout, rows, global, overall, e.color); err != nil {
 		return fail("%v", err)
 	}
 
@@ -158,6 +179,15 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	default:
 		return exitCrit
 	}
+}
+
+// loadSchedule returns the fork schedule from path, or the built-in one if
+// path is empty.
+func loadSchedule(path string) (*forks.Schedule, error) {
+	if path == "" {
+		return forks.Default()
+	}
+	return forks.LoadFile(path)
 }
 
 // defaultCacheDir returns the per-user cache directory, e.g. ~/.cache/x3f

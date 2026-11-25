@@ -13,6 +13,7 @@ import (
 
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/forks"
 	"github.com/ropslabs/x3f/internal/network"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
@@ -193,13 +194,22 @@ func refreshIfAhead(ctx context.Context, src *releases.Source, results []nodeRes
 type row struct {
 	node       string
 	level      status.Level
-	cells      [5]string // network, execution, EL sync, consensus, CL sync
-	findings   [5]status.Assessment
-	layerNames [5]string
+	cells      [6]string // network, execution, EL sync, consensus, CL sync, fork
+	findings   [6]status.Assessment
+	layerNames [6]string
+}
+
+// assessParams are the settings for assess.
+type assessParams struct {
+	now            time.Time
+	grace          time.Duration
+	schedule       *forks.Schedule
+	forkCriticalIn time.Duration
 }
 
 // assess evaluates all results. It returns the rows and the overall level.
-func assess(results []nodeResult, rel map[releases.Repo]releaseData, now time.Time, grace time.Duration) ([]row, status.Level) {
+func assess(results []nodeResult, rel map[releases.Repo]releaseData, p assessParams) ([]row, status.Level) {
+	now, grace := p.now, p.grace
 	versionInput := func(v ethereum.ClientVersion, err error) status.VersionInput {
 		in := status.VersionInput{Version: v, Err: err, Now: now, Grace: grace}
 		if repo, ok := releases.RepoFor(v.Client); ok {
@@ -214,7 +224,13 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, now time.Ti
 	for _, r := range results {
 		ev := versionInput(r.Execution.Version, r.Execution.VersionErr)
 		cv := versionInput(r.Consensus.Version, r.Consensus.VersionErr)
-		a := [5]status.Assessment{
+		chainID, haveChain := detectedChain(r)
+		fork := status.AssessForks(status.ForkInput{
+			Schedule: p.schedule, ChainID: chainID, HaveChain: haveChain,
+			Execution: r.Execution.Version, Consensus: r.Consensus.Version,
+			Now: now, CriticalWithin: p.forkCriticalIn,
+		})
+		a := [6]status.Assessment{
 			status.AssessNetwork(status.NetworkInput{
 				Expected:    r.Network,
 				ExecutionID: r.Execution.ChainID, ExecutionErr: r.Execution.ChainIDErr, ExecutionSkipped: r.Execution.Unreachable,
@@ -224,18 +240,20 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, now time.Ti
 			status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync),
 			status.AssessVersion(cv),
 			status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync),
+			fork.Assessment,
 		}
 		rw := row{
 			node: r.Name,
-			cells: [5]string{
+			cells: [6]string{
 				formatNetwork(r),
 				formatVersion(r.Execution.Version, r.Execution.VersionErr, ev),
 				formatSync(r.Execution.Unreachable, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
 				formatVersion(r.Consensus.Version, r.Consensus.VersionErr, cv),
 				formatSync(r.Consensus.Unreachable, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
+				fork.Cell,
 			},
 			findings:   a,
-			layerNames: [5]string{"network", "execution", "execution sync", "consensus", "consensus sync"},
+			layerNames: [6]string{"network", "execution", "execution sync", "consensus", "consensus sync", "fork"},
 		}
 		for _, x := range a {
 			rw.level = max(rw.level, x.Level)
@@ -244,6 +262,18 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, now time.Ti
 		rows = append(rows, rw)
 	}
 	return rows, overall
+}
+
+// detectedChain returns the node's chain ID, preferring the execution side.
+// If the two sides disagree, AssessNetwork already reports it as critical.
+func detectedChain(r nodeResult) (uint64, bool) {
+	if !r.Execution.Unreachable && r.Execution.ChainIDErr == nil {
+		return r.Execution.ChainID, true
+	}
+	if !r.Consensus.Unreachable && r.Consensus.ChainIDErr == nil {
+		return r.Consensus.ChainID, true
+	}
+	return 0, false
 }
 
 // ANSI escape codes for terminal colors.
@@ -281,13 +311,14 @@ func paint(s string, l status.Level, color bool) string {
 	return colorFor(l) + s + colorReset
 }
 
-// printReport writes the table, the findings and a summary line.
-func printReport(w io.Writer, rows []row, overall status.Level, color bool) error {
+// printReport writes the table, the findings and a summary line. global
+// holds findings that concern the run, not a single node.
+func printReport(w io.Writer, rows []row, global []status.Finding, overall status.Level, color bool) error {
 	// tabwriter aligns tab-separated columns. Arguments: minwidth, tabwidth,
 	// padding, padchar, flags.
 	var table bytes.Buffer
 	tw := tabwriter.NewWriter(&table, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tNODE\tNETWORK\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC")
+	fmt.Fprintln(tw, "STATUS\tNODE\tNETWORK\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC\tFORK")
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.level, r.node, strings.Join(r.cells[:], "\t"))
 	}
@@ -307,6 +338,10 @@ func printReport(w io.Writer, rows []row, overall status.Level, color bool) erro
 	}
 
 	var findings []string
+	for _, f := range global {
+		lbl := fmt.Sprintf("%-4s", label(f.Level, true))
+		findings = append(findings, fmt.Sprintf("  %s  %s", paint(lbl, f.Level, color), f.Message))
+	}
 	counts := map[status.Level]int{}
 	for _, r := range rows {
 		counts[r.level]++

@@ -43,7 +43,7 @@ Built with solo stakers and small validator teams in mind, people who run nodes 
 
 ## Usage (preview)
 
-> What works today: network detection, client versions, sync status and comparison with the latest stable GitHub release. Fork readiness, security advisories and alerts are not built yet.
+> What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release and fork readiness based on the announced client releases. Asking the node itself which forks it knows, security advisories and alerts are not built yet. Fork readiness, security advisories and alerts are not built yet.
 
 Build the binary (requires Go) and describe your nodes in `x3f.yaml` (see [`x3f.example.yaml`](x3f.example.yaml)):
 
@@ -53,15 +53,16 @@ go build -o x3f ./cmd/x3f
 ```
 
 ```
-STATUS  NODE       NETWORK  EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC
-OK      mainnet-1  mainnet  Geth 1.17.10 (stable)         synced   Lighthouse 8.3.3            synced
-CRIT    hoodi-1    hoodi    Besu 23.1.1 (dev) -> 26.11.2  synced   Nimbus 26.10.2 (stateofus)  syncing (1 slot behind), optimistic, EL offline
+STATUS  NODE       NETWORK  EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC                                          FORK
+OK      mainnet-1  mainnet  Geth 1.17.10 (stable)         synced   Lighthouse 8.3.3            synced                                           none scheduled
+CRIT    hoodi-1    hoodi    Besu 23.1.1 (dev) -> 26.11.2  synced   Nimbus 26.10.2 (stateofus)  syncing (1 slot behind), optimistic, EL offline  EL below Fusaka minimum
 
 Findings:
   CRIT  hoodi-1 execution: Besu dev build of 23.1.1 ("dev"): stable 23.1.1 released 1357 days ago; latest 26.11.2 (grace period 30 days)
   WARN  hoodi-1 consensus sync: syncing, 1 slot behind
   WARN  hoodi-1 consensus sync: optimistic: head not yet verified by the execution client
   CRIT  hoodi-1 consensus sync: execution client offline (reported by the consensus client)
+  CRIT  hoodi-1 fork: Besu 23.1.1 is older than the minimum release for Fusaka (25.10.0): it cannot follow hoodi
 
 Status: CRIT (1 OK, 0 WARN, 1 CRIT)
 ```
@@ -76,6 +77,7 @@ Endpoint URLs are never printed, only node names, because provider URLs often co
 |---|---|---|---|
 | **Version** | latest stable release (or newer, but not newer than every known release) | behind, but within the grace period; pre-release, dev build or unrecognized suffix; newer than every known release (proxy or custom build; x3f re-checks GitHub first); client not recognized; latest release unknown | behind for longer than the grace period (default 30 days, counted from the first newer stable release); client unreachable |
 | **Network** | both clients on the same network (and the configured one, if `network:` is set) | network could not be detected | execution and consensus client on different networks; node on another network than configured |
+| **Fork** | ready for the next fork, or none scheduled | not ready, more than 14 days before the fork; no ready client release announced yet ("waiting for client release") | older than the minimum release of an active fork; release still contains a postponed fork's former schedule; not ready within 14 days although a ready release exists |
 | **Sync** | synced | indexing; optimistic; up to 32 blocks/slots behind | execution client offline; more than 32 blocks/slots behind |
 
 If GitHub is unreachable, cached release data younger than 7 days is used with a note only; older or missing data turns the status yellow.
@@ -89,6 +91,10 @@ If GitHub is unreachable, cached release data younger than 7 days is used with a
 | `-grace-days` | `30` | days a client may lag behind the latest stable release before it turns red |
 | `-cache-dir` | `~/.cache/x3f` | where GitHub release data is cached (empty disables the cache) |
 | `-cache-ttl` | `1h` | how long cached data is used without asking GitHub |
+| `-forks` | built in | fork schedule file to use instead of the built-in one |
+| `-fork-critical-days` | `14` | days before a fork from which a client that is not ready turns red |
+
+The fork schedule is built into the binary ([`internal/forks/forks.yaml`](internal/forks/forks.yaml)): dates and client releases per network, taken only from official announcements, each with its source. x3f notes when the built-in data is older than 30 days.
 
 Environment: `GITHUB_TOKEN` (optional) raises the GitHub API rate limit from 60 to 5000 requests per hour; it is never stored or printed. `NO_COLOR` disables colors.
 

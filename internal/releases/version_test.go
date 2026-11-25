@@ -110,6 +110,16 @@ func TestCompare(t *testing.T) {
 		{ethereum.Besu, "23.10.3-hotfix", "23.10.3", 1}, // hotfix after release
 		{ethereum.Nimbus, "26.10.2-stateofus", "v26.10.2", 0},
 		{ethereum.Prysm, "7.3.2-mekong", "7.3.2", -1},
+		// Pre-releases of the same version (tags from the recorded data).
+		{ethereum.Grandine, "3.0.0-rc.1", "3.0.0-rc.2", -1},
+		{ethereum.Lighthouse, "8.0.0-rc.2", "8.0.0-rc.10", -1}, // numeric, not lexical
+		{ethereum.Erigon, "3.1.0-rc1", "3.1.0-rc2", -1},        // no dot
+		{ethereum.Besu, "25.10.0-RC2", "25.10.0-rc1", 1},       // case-insensitive
+		{ethereum.Erigon, "3.0.0-alpha7", "3.0.0-beta1", -1},
+		{ethereum.Reth, "0.2.0-beta.9", "0.2.0-rc.1", -1},
+		{ethereum.Lighthouse, "8.3.0-rc.0", "8.3.0-rc.0", 0},
+		{ethereum.Grandine, "2.0.0.rc0", "2.0.0-rc.0", 0},   // dot form equals dash form
+		{ethereum.Lighthouse, "1.0.0-rc", "1.0.0-rc.1", -1}, // shorter first
 	}
 	for _, tt := range tests {
 		if got := Compare(tt.client, v(tt.a), v(tt.b)); got != tt.want {
