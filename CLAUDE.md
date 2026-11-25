@@ -93,3 +93,13 @@ scripts/              release build (build-release.sh)
 7. Prometheus metrics (e.g. a file for the node_exporter textfile collector)
 
 Steps 1–5 are done (1–4 released as v0.1.0). Later, not scheduled yet: Nagios output format (with the company module; the first audience, solo stakers, uses Prometheus, Grafana and Telegram) and the forkId check.
+
+While working on steps 5–7: where it costs no extra effort, do not hard-wire logic to the execution/consensus pair, so the component model below stays a small refactor.
+
+## Roadmap after version 1
+
+Recorded for later; not part of v1, do not implement yet.
+
+1. **General component model.** A component has a type, a version source, an upstream repository and a health check. Execution and consensus clients become the first types: compiled-in implementations of one shared interface, not Go's `plugin` package.
+2. **Local web UI** on top of that model: `x3f serve`, embedded in the binary, listening on localhost by default, read-only.
+3. **New component types:** validator client, MEV-Boost, later L2 nodes and indexers.
