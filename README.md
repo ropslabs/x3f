@@ -4,7 +4,7 @@
 
 x3f tells you what is running where, in which version, who owns it, and what needs attention next: known vulnerabilities, end-of-life dates and, for blockchain nodes, upcoming hard forks.
 
-> **Status:** early stage (v0.x). The Ethereum node check below works today; inventory, security advisories and alerts are planned. Flags and output may still change between 0.x releases.
+> **Status:** early stage (v0.x). The Ethereum node check below works today, including known security advisories of the clients; inventory and alerts are planned. Flags and output may still change between 0.x releases.
 >
 > *An n-day is a known vulnerability that already has a fix. Many attacks don't need a zero-day, just a system where the existing patch was never applied. x3f finds those systems.*
 
@@ -12,7 +12,7 @@ x3f tells you what is running where, in which version, who owns it, and what nee
 
 ## Quick start
 
-x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, and whether they are ready for the next hard fork. It is a single binary that only reads from your nodes.
+x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, whether a published security advisory affects them, and whether they are ready for the next hard fork. It is a single binary that only reads from your nodes.
 
 ### Install
 
@@ -69,7 +69,7 @@ x3f prints a table, the findings and a summary, and exits with `0` (OK), `1` (wa
 */15 * * * * /usr/local/bin/x3f -config /etc/x3f/x3f.yaml > /var/lib/x3f/last.txt 2>&1
 ```
 
-x3f asks GitHub for the latest releases and caches the answers for an hour. Without a token GitHub allows 60 requests per hour; with many different clients or frequent runs, set `GITHUB_TOKEN` (any token works, it needs no permissions).
+x3f asks GitHub for the latest releases and security advisories and caches the answers for an hour: two requests per client and hour, however many nodes run that client. Without a token GitHub allows 60 requests per hour; with many different clients or frequent runs, set `GITHUB_TOKEN` (any token works, it needs no permissions).
 
 ### Supported
 
@@ -114,26 +114,26 @@ Built with solo stakers and small validator teams in mind, people who run nodes 
 
 ## Usage
 
-> What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release and fork readiness (asked from the node itself, with the announced client releases as fallback). Security advisories and alerts are not built yet.
+> What works today: network detection, client versions, sync status, comparison with the latest stable GitHub release, security advisories of the client repositories and fork readiness (asked from the node itself, with the announced client releases as fallback). Alerts are not built yet.
 
 Example output:
 
 ```
-STATUS  NODE       NETWORK  EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC                         FORK
-OK      mainnet-1  mainnet  Geth 1.17.10 (stable)         synced   Lighthouse 8.3.3            synced                          none scheduled
-CRIT    hoodi-1    hoodi    Besu 23.1.1 (dev) -> 26.11.2  synced   Nimbus 26.10.2 (stateofus)  synced, optimistic, EL offline  EL below Fusaka minimum
+STATUS  NODE       NETWORK  EXECUTION                     EL SYNC  CONSENSUS                   CL SYNC  FORK                     ADVISORIES
+OK      mainnet-1  mainnet  Geth 1.17.10 (stable)         synced   Lighthouse 8.3.3            synced   none scheduled           none known
+CRIT    mainnet-2  mainnet  Besu 23.1.1 (dev) -> 26.11.2  synced   Nimbus 26.10.2 (stateofus)  synced   EL below Fusaka minimum  EL 38 (high)
 
 Findings:
-  CRIT  hoodi-1 execution: Besu dev build of 23.1.1 ("dev"): stable 23.1.1 released 1358 days ago; latest 26.11.2 (grace period 30 days)
-  WARN  hoodi-1 consensus sync: optimistic: head not yet verified by the execution client
-  CRIT  hoodi-1 consensus sync: execution client offline (reported by the consensus client)
-  NOTE  hoodi-1 fork: fork check of the execution client by version only: eth_config: JSON-RPC error -32601: The method eth_config does not exist/is not available
-  CRIT  hoodi-1 fork: Besu 23.1.1 is older than the minimum release for Fusaka (25.10.0): it cannot follow hoodi
+  CRIT  mainnet-2 execution: Besu dev build of 23.1.1 ("dev"): stable 23.1.1 released 1358 days ago; latest 26.11.2 (grace period 30 days)
+  NOTE  mainnet-2 fork: fork check of the execution client by version only: eth_config: JSON-RPC error -32601: The method eth_config does not exist/is not available
+  CRIT  mainnet-2 fork: Besu 23.1.1 is older than the minimum release for Fusaka (25.11.0): it cannot follow mainnet
+  CRIT  mainnet-2 execution advisories: Besu 23.1.1 is affected by 38 published advisories (13 high, 19 medium, 6 low), fixed in 26.11.0 or later: GHSA-4h4f-925g-8h9p (high: "EIP-7702 and sender signature recovery skips the secp256k1 curve-orde…"), GHSA-m886-r6ch-pjvr (high: "QBFT/IBFT2 message decode performs unbounded eager signature recovery…"), GHSA-g5j7-4r2x-rx9j (high: "A permissionless non-validator peer can halt QBFT finality through pr…") and 35 more; https://github.com/besu-eth/besu/security/advisories
+  NOTE  mainnet-2 execution advisories: cannot tell whether Besu 23.1.1 is affected by GHSA-v5gq-r843-8f73 (medium: "SEC-50 RLPx AES CTR keystream reusage #1315. (Case for private networ…"), check it yourself (affected versions "all", patched "")
 
 Status: CRIT (1 OK, 0 WARN, 1 CRIT)
 ```
 
-(Real output from 2026-11-25: mock nodes replaying the test fixtures, release data from the live GitHub API.)
+(Real output from 2026-11-25: mock nodes replaying the test fixtures, release and advisory data from the live GitHub API.)
 
 Endpoint URLs are never printed, only node names, because provider URLs often contain API keys.
 
@@ -144,10 +144,11 @@ Endpoint URLs are never printed, only node names, because provider URLs often co
 | **Version** | latest stable release (or newer, but not newer than every known release) | behind, but within the grace period; pre-release, dev build or unrecognized suffix; newer than every known release (proxy or custom build; x3f re-checks GitHub first); client not recognized; latest release unknown | behind for longer than the grace period (default 30 days, counted from the first newer stable release); client unreachable |
 | **Network** | both clients on the same network (and the configured one, if `network:` is set) | network could not be detected | execution and consensus client on different networks; node on another network than configured |
 | **Fork** (node answer) | the node schedules exactly the forks in the fork schedule | a fork the schedule does not list, more than 14 days ahead (the schedule may be outdated); not ready, more than 14 days before the fork, or no ready release known | not on the latest active fork; still schedules a postponed fork at its former time; an unknown fork within 14 days or already passed; not ready within 14 days although a ready release exists |
+| **Advisories** | no published advisory affects the running version ("none known") | affected by a medium or low advisory (or one without severity); affected by an advisory whose fix is not released yet; advisory data unknown | affected by a critical or high advisory whose fix is released, with no grace period |
 | **Fork** (version fallback) | ready for the next fork, or none scheduled | not ready, more than 14 days before the fork; no ready client release announced yet ("waiting for client release") | older than the minimum release of an active fork; release still contains a postponed fork's former schedule; not ready within 14 days although a ready release exists |
 | **Sync** | synced | indexing; optimistic; up to 32 blocks/slots behind | execution client offline; more than 32 blocks/slots behind |
 
-If GitHub is unreachable, cached release data younger than 7 days is used with a note only; older or missing data turns the status yellow.
+If GitHub is unreachable, cached release and advisory data younger than 7 days is used with a note only; older or missing data turns the status yellow.
 
 ### Flags
 
@@ -169,6 +170,12 @@ The fork schedule is built into the binary ([`internal/forks/forks.yaml`](intern
 For fork readiness x3f asks the node itself: the execution client via `eth_config` ([EIP-7910](https://eips.ethereum.org/EIPS/eip-7910)), the consensus client via `GET /eth/v1/config/spec` (fork epochs and `BLOB_SCHEDULE`). The answer is compared with the fork schedule. If a client does not answer (older releases, proxies that block the method), x3f falls back to comparing the client version with the announced releases and adds a note. If the execution and consensus client are on different networks, the fork check is skipped.
 
 Point x3f directly at each node, not at a proxy or load balancer: behind one, every request may be answered by a different node, so version, sync status and fork schedule would not describe the same machine. Versions that look like a proxy (newer than every known release) are reported in yellow as a safety net.
+
+### Security advisories
+
+x3f reads the published [security advisories](https://docs.github.com/en/code-security/concepts/vulnerability-reporting-and-management/repository-security-advisories) of each client's GitHub repository and checks the running version against the affected versions. A finding names how many advisories affect the node, the release that fixes all of them, and the most severe three with their GHSA ID, CVE and title, so you can judge whether they apply to your setup (for example, many Besu advisories concern QBFT, IBFT or Clique, consensus protocols of private networks). Advisories whose affected versions x3f cannot determine are listed as a note to check yourself.
+
+"none known" does not mean "no known vulnerabilities": x3f only sees what a client publishes as a GitHub advisory. As of November 2026, Reth, Nethermind, Ethrex, Prysm, Nimbus and Grandine had none published there; check their release notes and security channels as well.
 
 ### Environment
 

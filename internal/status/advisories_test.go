@@ -73,11 +73,11 @@ func TestAssessAdvisoriesRecorded(t *testing.T) {
 			name: "besu 26.10.2", raw: "besu/v26.10.2/linux-x86_64/openjdk-java-21",
 			repo: "besu-eth_besu", level: Warn, cell: "4 (medium)", notes: 1,
 			want: []string{
-				`cannot tell whether Besu 26.10.2 is affected by GHSA-v5gq-r843-8f73 (medium: "SEC-50 RLPx AES CTR keystream reusage #1315. (Case for private`,
-				`(affected versions "all", patched "")`,
 				"Besu 26.10.2 is affected by 4 published advisories (1 medium, 3 low), fixed in 26.11.0 or later: ",
 				`GHSA-mp5j-q856-vvx7 (medium: "Malformed peer receipts poison`,
 				"and 1 more; https://github.com/besu-eth/besu/security/advisories",
+				`cannot tell whether Besu 26.10.2 is affected by GHSA-v5gq-r843-8f73 (medium: "SEC-50 RLPx AES CTR keystream reusage #1315. (Case for private`,
+				`(affected versions "all", patched "")`,
 			},
 		},
 		{

@@ -90,13 +90,12 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 		}
 	}
 
-	var fixed, unfixed []affectedBy
+	var fixed, unfixed, unclear []affectedBy
 	for _, a := range in.Advisories.Advisories {
 		m, fix, hasFix := a.Check(v.Client, running)
 		switch m {
 		case releases.Unclear:
-			r.add(OK, "cannot tell whether %s is affected by %s, check it yourself (affected versions %s, patched %s)",
-				name, describeAdvisory(a), quoteRanges(a, false), quoteRanges(a, true))
+			unclear = append(unclear, affectedBy{adv: a})
 		case releases.Affected:
 			released := hasFix && (in.Releases == nil || releases.ReleasedAtLeast(v.Client, in.Releases.Releases, fix))
 			ab := affectedBy{adv: a, fix: fix, released: released}
@@ -126,6 +125,11 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 	if len(unfixed) > 0 {
 		r.add(Warn, "%s is affected by %s: no fix released yet, check the advisory for mitigations: %s; %s",
 			name, countAdvisories(unfixed, " without a released fix"), listAdvisories(unfixed), link)
+	}
+	// Notes last: they matter less than what is known to affect the node.
+	for _, u := range unclear {
+		r.add(OK, "cannot tell whether %s is affected by %s, check it yourself (affected versions %s, patched %s)",
+			name, describeAdvisory(u.adv), quoteRanges(u.adv, false), quoteRanges(u.adv, true))
 	}
 
 	all := append(slices.Clone(fixed), unfixed...)

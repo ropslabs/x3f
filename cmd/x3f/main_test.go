@@ -67,8 +67,8 @@ func mockClient(t *testing.T, responses map[string][]byte) *httptest.Server {
 	return srv
 }
 
-// fakeGitHub serves the recorded releases from internal/releases/testdata
-// (sources: internal/releases/testdata/SOURCES.md).
+// fakeGitHub serves the recorded releases and security advisories from
+// internal/releases/testdata (sources: internal/releases/testdata/SOURCES.md).
 type fakeGitHub struct {
 	*httptest.Server
 	down     atomic.Bool
@@ -100,12 +100,22 @@ func newFakeGitHub(t *testing.T) *fakeGitHub {
 			return
 		}
 		// /repos/{owner}/{repo}/releases -> {owner}_{repo}.json
+		// /repos/{owner}/{repo}/security-advisories -> advisories/{owner}_{repo}.json
 		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
-		if len(parts) != 4 || parts[0] != "repos" || parts[3] != "releases" {
+		if len(parts) != 4 || parts[0] != "repos" {
 			http.NotFound(w, r)
 			return
 		}
-		body, err := os.ReadFile(filepath.Join("..", "..", "internal", "releases", "testdata", "github", parts[1]+"_"+parts[2]+".json"))
+		dir := filepath.Join("..", "..", "internal", "releases", "testdata", "github")
+		switch parts[3] {
+		case "releases":
+		case "security-advisories":
+			dir = filepath.Join(dir, "advisories")
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		body, err := os.ReadFile(filepath.Join(dir, parts[1]+"_"+parts[2]+".json"))
 		if err != nil {
 			http.NotFound(w, r)
 			return
@@ -254,12 +264,12 @@ nodes:
 		node string
 		want []string
 	}{
-		{"NODE", []string{"STATUS", "NODE", "NETWORK", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC", "FORK"}},
-		{"good-node", []string{"OK", "good-node", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled"}},
-		{"warn-node", []string{"WARN", "warn-node", "mainnet", "Geth 1.17.10 (stable)", "indexing", "Lighthouse 8.3.3", "synced", "none scheduled"}},
-		{"outdated-node", []string{"CRIT", "outdated-node", "mainnet", "Besu 23.1.1 (dev) -> 26.11.2", "synced", "Nimbus 26.10.2 (stateofus)", "synced", "EL below Fusaka minimum"}},
-		{"down-node", []string{"CRIT", "down-node", "?", "ERROR", "-", "ERROR", "ERROR", "-"}},
-		{"proxy-node", []string{"WARN", "proxy-node", "mainnet", "ERROR", "synced", "Lighthouse 8.3.3", "synced", "none scheduled"}},
+		{"NODE", []string{"STATUS", "NODE", "NETWORK", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC", "FORK", "ADVISORIES"}},
+		{"good-node", []string{"OK", "good-node", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled", "none known"}},
+		{"warn-node", []string{"WARN", "warn-node", "mainnet", "Geth 1.17.10 (stable)", "indexing", "Lighthouse 8.3.3", "synced", "none scheduled", "none known"}},
+		{"outdated-node", []string{"CRIT", "outdated-node", "mainnet", "Besu 23.1.1 (dev) -> 26.11.2", "synced", "Nimbus 26.10.2 (stateofus)", "synced", "EL below Fusaka minimum", "EL 38 (high)"}},
+		{"down-node", []string{"CRIT", "down-node", "?", "ERROR", "-", "ERROR", "ERROR", "-", "-"}},
+		{"proxy-node", []string{"WARN", "proxy-node", "mainnet", "ERROR", "synced", "Lighthouse 8.3.3", "synced", "none scheduled", "none known"}},
 	}
 	for _, r := range rows {
 		if cells := rowCells(t, got, r.node); !slices.Equal(cells, r.want) {
@@ -279,6 +289,9 @@ nodes:
 		"CRIT  outdated-node fork: Besu 23.1.1 is older than the minimum release for Fusaka (25.11.0): it cannot follow mainnet",
 		"NOTE  outdated-node fork: fork check of the execution client by version only: eth_config: JSON-RPC error -32601: The method eth_config does not exist/is not available",
 		"WARN  down-node network: consensus network detection failed: /eth/v1/config/deposit_contract: unexpected HTTP status 404 Not Found",
+		// Real data: 38 Besu advisories affect 23.1.1-dev.
+		"CRIT  outdated-node execution advisories: Besu 23.1.1 is affected by 38 published advisories (13 high, 19 medium, 6 low), fixed in 26.11.0 or later: GHSA-",
+		"; https://github.com/besu-eth/besu/security/advisories\n  NOTE  outdated-node execution advisories: cannot tell whether Besu 23.1.1 is affected by GHSA-v5gq-r843-8f73",
 		"Status: CRIT (1 OK, 2 WARN, 2 CRIT)",
 	} {
 		if !strings.Contains(got, want) {
@@ -286,14 +299,18 @@ nodes:
 		}
 	}
 
-	// One GitHub request per detected client repository, even though Geth
-	// and Lighthouse run on several nodes.
+	// One GitHub request per list and detected client repository, even
+	// though Geth and Lighthouse run on several nodes.
 	gh.mu.Lock()
 	wantRequests := map[string]int{
-		"/repos/ethereum/go-ethereum/releases":  1,
-		"/repos/besu-eth/besu/releases":         1,
-		"/repos/sigp/lighthouse/releases":       1,
-		"/repos/status-im/nimbus-eth2/releases": 1,
+		"/repos/ethereum/go-ethereum/releases":             1,
+		"/repos/besu-eth/besu/releases":                    1,
+		"/repos/sigp/lighthouse/releases":                  1,
+		"/repos/status-im/nimbus-eth2/releases":            1,
+		"/repos/ethereum/go-ethereum/security-advisories":  1,
+		"/repos/besu-eth/besu/security-advisories":         1,
+		"/repos/sigp/lighthouse/security-advisories":       1,
+		"/repos/status-im/nimbus-eth2/security-advisories": 1,
 	}
 	if !maps.Equal(gh.requests, wantRequests) {
 		t.Errorf("GitHub requests = %v, want %v", gh.requests, wantRequests)
@@ -359,17 +376,21 @@ func TestRunGitHubOutage(t *testing.T) {
 	gh.down.Store(true)
 
 	code, out := runAt(now.Add(3*24*time.Hour), cache)
-	if code != exitOK || !strings.Contains(out, "NOTE  a execution: GitHub not reachable, using release data from 2026-11-24") {
-		t.Errorf("3 days: exit %d, want 0 with a note\n%s", code, out)
+	if code != exitOK || !strings.Contains(out, "NOTE  a execution: GitHub not reachable, using release data from 2026-11-24") ||
+		!strings.Contains(out, "NOTE  a execution advisories: GitHub not reachable, using advisory data from 2026-11-24") {
+		t.Errorf("3 days: exit %d, want 0 with notes\n%s", code, out)
 	}
 
 	code, out = runAt(now.Add(8*24*time.Hour), cache)
-	if code != exitWarn || !strings.Contains(out, "WARN  a execution: release data is 8 days old") {
-		t.Errorf("8 days: exit %d, want 1 with a warning\n%s", code, out)
+	if code != exitWarn || !strings.Contains(out, "WARN  a execution: release data is 8 days old") ||
+		!strings.Contains(out, "WARN  a consensus advisories: advisory data is 8 days old") {
+		t.Errorf("8 days: exit %d, want 1 with warnings\n%s", code, out)
 	}
 
 	code, out = runAt(now, t.TempDir()) // empty cache
-	if code != exitWarn || !strings.Contains(out, "latest release unknown") {
+	if code != exitWarn || !strings.Contains(out, "latest release unknown") ||
+		!strings.Contains(out, "WARN  a execution advisories: advisories unknown: GitHub security advisories of ethereum/go-ethereum: unexpected HTTP status 503") ||
+		rowCells(t, out, "a")[8] != "EL ?, CL ?" {
 		t.Errorf("no cache: exit %d, want 1\n%s", code, out)
 	}
 }
@@ -978,7 +999,7 @@ func TestRunEthrex(t *testing.T) {
 	if code != exitOK {
 		t.Errorf("exit %d, want %d\n%s", code, exitOK, got)
 	}
-	want := []string{"OK", "n", "mainnet", "Ethrex 31.0.0 (HEAD)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled"}
+	want := []string{"OK", "n", "mainnet", "Ethrex 31.0.0 (HEAD)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled", "none known"}
 	if cells := rowCells(t, got, "n"); !slices.Equal(cells, want) {
 		t.Errorf("row:\n got  %q\n want %q", cells, want)
 	}
@@ -1001,5 +1022,22 @@ func TestVersionFlag(t *testing.T) {
 	version = "v0.1.0" // as set by -ldflags "-X main.version=v0.1.0"
 	if got := buildVersion(); got != "v0.1.0" {
 		t.Errorf("buildVersion = %q", got)
+	}
+}
+
+func TestFormatAdvisories(t *testing.T) {
+	tests := []struct{ el, cl, want string }{
+		{"none known", "none known", "none known"},
+		{"5 (high)", "none known", "EL 5 (high)"},
+		{"none known", "1 (low)", "CL 1 (low)"},
+		{"2 (medium)", "?", "EL 2 (medium), CL ?"},
+		{"", "none known", "none known"}, // execution client not assessed
+		{"", "?", "CL ?"},
+		{"", "", "-"},
+	}
+	for _, tt := range tests {
+		if got := formatAdvisories(tt.el, tt.cl); got != tt.want {
+			t.Errorf("formatAdvisories(%q, %q) = %q, want %q", tt.el, tt.cl, got, tt.want)
+		}
 	}
 }

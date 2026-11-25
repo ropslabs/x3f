@@ -129,15 +129,37 @@ func withTimeout[T any](ctx context.Context, timeout time.Duration, endpoint str
 	return fetch(ctx, endpoint)
 }
 
-// releaseData is the outcome of fetching one repository's releases.
-type releaseData struct {
-	result *releases.Result // nil if no data could be obtained
+// repoData is the outcome of fetching one list (releases or advisories)
+// of one repository.
+type repoData[T any] struct {
+	result *T // nil if no data could be obtained
 	err    error
 }
+
+// releaseData and advisoryData are aliases (note the "="): other names for
+// the instantiated generic types, not new types.
+type (
+	releaseData  = repoData[releases.Result]
+	advisoryData = repoData[releases.AdvisoryResult]
+)
 
 // fetchReleases fetches the releases of every client that was detected,
 // once per repository and concurrently.
 func fetchReleases(ctx context.Context, src *releases.Source, results []nodeResult, timeout time.Duration) map[releases.Repo]releaseData {
+	return fetchPerRepo(ctx, results, timeout, src.Releases)
+}
+
+// fetchAdvisories fetches the security advisories the same way.
+func fetchAdvisories(ctx context.Context, src *releases.Source, results []nodeResult, timeout time.Duration) map[releases.Repo]advisoryData {
+	return fetchPerRepo(ctx, results, timeout, src.Advisories)
+}
+
+// fetchPerRepo calls fetch once for the repository of every detected
+// client, concurrently. fetch is a method value such as src.Releases; Go
+// infers T from its result type.
+func fetchPerRepo[T any](ctx context.Context, results []nodeResult, timeout time.Duration,
+	fetch func(context.Context, releases.Repo) (T, error)) map[releases.Repo]repoData[T] {
+
 	var repos []releases.Repo
 	for _, r := range results {
 		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
@@ -147,7 +169,7 @@ func fetchReleases(ctx context.Context, src *releases.Source, results []nodeResu
 		}
 	}
 
-	data := make(map[releases.Repo]releaseData, len(repos))
+	data := make(map[releases.Repo]repoData[T], len(repos))
 	// Several goroutines write to the same map, which Go does not allow
 	// without synchronisation; the mutex makes the writes take turns.
 	var mu sync.Mutex
@@ -156,8 +178,8 @@ func fetchReleases(ctx context.Context, src *releases.Source, results []nodeResu
 		wg.Go(func() {
 			ctx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			res, err := src.Releases(ctx, repo)
-			d := releaseData{err: err}
+			res, err := fetch(ctx, repo)
+			d := repoData[T]{err: err}
 			if err == nil {
 				d.result = &res
 			}
@@ -203,11 +225,17 @@ func refreshIfAhead(ctx context.Context, src *releases.Source, results []nodeRes
 
 // row is one table row with its assessments.
 type row struct {
-	node       string
-	level      status.Level
-	cells      [6]string // network, execution, EL sync, consensus, CL sync, fork
-	findings   [6]status.Assessment
-	layerNames [6]string
+	node     string
+	level    status.Level
+	cells    [7]string // network, execution, EL sync, consensus, CL sync, fork, advisories
+	findings []layerFindings
+}
+
+// layerFindings are the findings of one part of a node, e.g. "execution
+// sync". The advisories column has two: one per client.
+type layerFindings struct {
+	name string
+	status.Assessment
 }
 
 // assessParams are the settings for assess.
@@ -219,13 +247,22 @@ type assessParams struct {
 }
 
 // assess evaluates all results. It returns the rows and the overall level.
-func assess(results []nodeResult, rel map[releases.Repo]releaseData, p assessParams) ([]row, status.Level) {
+func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[releases.Repo]advisoryData, p assessParams) ([]row, status.Level) {
 	now, grace := p.now, p.grace
 	versionInput := func(v ethereum.ClientVersion, err error) status.VersionInput {
 		in := status.VersionInput{Version: v, Err: err, Now: now, Grace: grace}
 		if repo, ok := releases.RepoFor(v.Client); ok {
 			d := rel[repo]
 			in.Releases, in.ReleasesErr = d.result, d.err
+		}
+		return in
+	}
+	advisoryInput := func(v ethereum.ClientVersion, err error) status.AdvisoryInput {
+		in := status.AdvisoryInput{Version: v, Err: err, Now: now}
+		if repo, ok := releases.RepoFor(v.Client); ok {
+			d := adv[repo]
+			in.Advisories, in.AdvisoriesErr = d.result, d.err
+			in.Releases = rel[repo].result
 		}
 		return in
 	}
@@ -243,30 +280,34 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, p assessPar
 			ConsensusConfig: r.Consensus.ForkConfig, ConsensusConfigErr: r.Consensus.ForkConfigErr,
 			Now: now, CriticalWithin: p.forkCriticalIn,
 		})
-		a := [6]status.Assessment{
-			status.AssessNetwork(status.NetworkInput{
+		ea := status.AssessAdvisories(advisoryInput(r.Execution.Version, r.Execution.VersionErr))
+		ca := status.AssessAdvisories(advisoryInput(r.Consensus.Version, r.Consensus.VersionErr))
+		a := []layerFindings{
+			{"network", status.AssessNetwork(status.NetworkInput{
 				Expected:    r.Network,
 				ExecutionID: r.Execution.ChainID, ExecutionErr: r.Execution.ChainIDErr, ExecutionSkipped: r.Execution.Unreachable,
 				ConsensusID: r.Consensus.ChainID, ConsensusErr: r.Consensus.ChainIDErr, ConsensusSkipped: r.Consensus.Unreachable,
-			}),
-			status.AssessVersion(ev),
-			status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync),
-			status.AssessVersion(cv),
-			status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync),
-			fork.Assessment,
+			})},
+			{"execution", status.AssessVersion(ev)},
+			{"execution sync", status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync)},
+			{"consensus", status.AssessVersion(cv)},
+			{"consensus sync", status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync)},
+			{"fork", fork.Assessment},
+			{"execution advisories", ea.Assessment},
+			{"consensus advisories", ca.Assessment},
 		}
 		rw := row{
 			node: r.Name,
-			cells: [6]string{
+			cells: [7]string{
 				formatNetwork(r),
 				formatVersion(r.Execution.Version, r.Execution.VersionErr, ev),
 				formatSync(r.Execution.Unreachable, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
 				formatVersion(r.Consensus.Version, r.Consensus.VersionErr, cv),
 				formatSync(r.Consensus.Unreachable, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
 				fork.Cell,
+				formatAdvisories(ea.Cell, ca.Cell),
 			},
-			findings:   a,
-			layerNames: [6]string{"network", "execution", "execution sync", "consensus", "consensus sync", "fork"},
+			findings: a,
 		}
 		for _, x := range a {
 			rw.level = max(rw.level, x.Level)
@@ -337,7 +378,7 @@ func printReport(w io.Writer, rows []row, global []status.Finding, overall statu
 	// padding, padchar, flags.
 	var table bytes.Buffer
 	tw := tabwriter.NewWriter(&table, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tNODE\tNETWORK\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC\tFORK")
+	fmt.Fprintln(tw, "STATUS\tNODE\tNETWORK\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC\tFORK\tADVISORIES")
 	for _, r := range rows {
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.level, r.node, strings.Join(r.cells[:], "\t"))
 	}
@@ -364,11 +405,11 @@ func printReport(w io.Writer, rows []row, global []status.Finding, overall statu
 	counts := map[status.Level]int{}
 	for _, r := range rows {
 		counts[r.level]++
-		for i, a := range r.findings {
+		for _, a := range r.findings {
 			for _, f := range a.Findings {
 				lbl := fmt.Sprintf("%-4s", label(f.Level, true))
 				findings = append(findings, fmt.Sprintf("  %s  %s %s: %s",
-					paint(lbl, f.Level, color), r.node, r.layerNames[i], f.Message))
+					paint(lbl, f.Level, color), r.node, a.name, f.Message))
 			}
 		}
 	}
@@ -406,6 +447,26 @@ func formatVersion(v ethereum.ClientVersion, err error, in status.VersionInput) 
 		}
 	}
 	return s
+}
+
+// formatAdvisories combines the advisory cells of both clients, e.g.
+// "EL 5 (high)", "EL 1 (low), CL ?" or "none known". "-" means neither
+// client could be assessed.
+func formatAdvisories(el, cl string) string {
+	var parts []string
+	for _, p := range []struct{ layer, cell string }{{"EL", el}, {"CL", cl}} {
+		if p.cell != "" && p.cell != "none known" {
+			parts = append(parts, p.layer+" "+p.cell)
+		}
+	}
+	switch {
+	case len(parts) > 0:
+		return strings.Join(parts, ", ")
+	case el != "" || cl != "":
+		return "none known"
+	default:
+		return "-"
+	}
 }
 
 // formatNetwork renders the network cell: the network both clients are on,

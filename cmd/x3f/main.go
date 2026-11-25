@@ -33,8 +33,9 @@ const usageText = `Usage: x3f [flags]
 
 x3f queries the Ethereum nodes listed in the config file (read-only) and
 reports the network, client versions, sync status, whether the clients are
-behind their latest stable GitHub release and whether they are ready for
-the next fork: the node's own fork schedule (eth_config,
+behind their latest stable GitHub release, whether a published GitHub
+security advisory of the client repository affects them, and whether they
+are ready for the next fork: the node's own fork schedule (eth_config,
 /eth/v1/config/spec) is compared with the built-in one (see -forks); if a
 client does not report it, its version is compared with the announced
 releases.
@@ -164,10 +165,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	}
 	rel := fetchReleases(ctx, src, results, *timeout)
 	refreshIfAhead(ctx, src, results, rel, *timeout)
+	adv := fetchAdvisories(ctx, src, results, *timeout)
 
 	day := 24 * time.Hour
 	now := e.now()
-	rows, overall := assess(results, rel, assessParams{
+	rows, overall := assess(results, rel, adv, assessParams{
 		now:            now,
 		grace:          time.Duration(*graceDays) * day,
 		schedule:       schedule,
