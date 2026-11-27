@@ -347,6 +347,72 @@ func aztecFixture(t *testing.T, name string) []byte {
 	return data
 }
 
+// l1Fixture reads a recorded L1 answer from the aztec package's testdata
+// (sources: internal/aztec/testdata/SOURCES.md).
+func l1Fixture(t *testing.T, name string) []byte {
+	t.Helper()
+	return aztecFixture(t, "live/l1/"+name)
+}
+
+// Registry and canonical rollup of mainnet, from the recorded getNodeInfo
+// answer, and the selectors of getCanonicalRollup() and getVersion() (see
+// internal/aztec/l1.go).
+const (
+	mainnetRegistry = "0x35b22e09ee0390539439e24f06da43d83f90e298"
+	mainnetRollup   = "0xe37a2663cc9c119ba41572c40fab0bbb23a5402f"
+	selCanonical    = "0x971b0e6b"
+	selVersion      = "0x0d8e6e2c"
+)
+
+// l1Node is a mock Ethereum execution client that also answers eth_call:
+// methods answers by method name, calls by "<to> <data>". It counts the
+// eth_call requests.
+type l1Node struct {
+	*httptest.Server
+	ethCalls atomic.Int32
+}
+
+func newL1Node(t *testing.T, methods, calls map[string][]byte) *l1Node {
+	t.Helper()
+	n := &l1Node{}
+	n.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Method string `json:"method"`
+			Params []struct {
+				To   string `json:"to"`
+				Data string `json:"data"`
+			} `json:"params"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		body, ok := methods[req.Method]
+		if req.Method == "eth_call" {
+			n.ethCalls.Add(1)
+			if len(req.Params) > 0 {
+				body, ok = calls[req.Params[0].To+" "+req.Params[0].Data]
+			}
+		}
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write(body)
+	}))
+	t.Cleanup(n.Close)
+	return n
+}
+
+// mainnetL1 answers like an Ethereum mainnet node for the Aztec reads
+// (recorded answers).
+func mainnetL1(t *testing.T, methods map[string][]byte) *l1Node {
+	t.Helper()
+	all := map[string][]byte{"eth_chainId": l1Fixture(t, "eth_chainId-publicnode-mainnet.json")}
+	maps.Copy(all, methods)
+	return newL1Node(t, all, map[string][]byte{
+		mainnetRegistry + " " + selCanonical: l1Fixture(t, "eth_call-getCanonicalRollup-publicnode-mainnet.json"),
+		mainnetRollup + " " + selVersion:     l1Fixture(t, "eth_call-getVersion-publicnode-mainnet.json"),
+	})
+}
+
 // TestRunAztec checks an Aztec node end to end: its own table, the version
 // and advisory rules with the recorded GitHub data (releases of aztec-node,
 // advisories of aztec-packages), the metrics,
@@ -359,10 +425,16 @@ func TestRunAztec(t *testing.T) {
 	node := mockClient(t, map[string][]byte{
 		"aztec_getNodeInfo": aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json"),
 	})
+	// The Ethereum node is checked as usual and is the Aztec node's L1.
+	l1 := mainnetL1(t, map[string][]byte{
+		"web3_clientVersion": fixture(t, "execution/geth.json"),
+		"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+		"eth_config":         fixture(t, "execution/live/eth-config-publicnode-mainnet.json"),
+	})
 	path := writeConfig(t, `
 nodes:
   - name: l1
-    execution_url: `+m.gethSynced.URL+`
+    execution_url: `+l1.URL+`
     beacon_url: `+m.lighthouseSynced.URL+`
   - name: aztec-1
     type: aztec
@@ -385,7 +457,7 @@ nodes:
 	}
 
 	// The Aztec table follows the Ethereum table.
-	if i, j := strings.Index(got, "STATUS  NODE  NETWORK"), strings.Index(got, "STATUS  NODE        VERSION"); i < 0 || j < i {
+	if i, j := strings.Index(got, "STATUS  NODE  NETWORK  EXECUTION"), strings.Index(got, "STATUS  NODE        NETWORK  VERSION"); i < 0 || j < i {
 		t.Errorf("want the Ethereum table, then the Aztec table:\n%s", got)
 	}
 	rows := []struct {
@@ -393,8 +465,8 @@ nodes:
 		want []string
 	}{
 		{"l1", []string{"OK", "l1", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled", "none known"}},
-		{"aztec-1", []string{"WARN", "aztec-1", "Aztec 6.0.0 -> 6.1.0", "1 (medium)"}},
-		{"aztec-down", []string{"CRIT", "aztec-down", "ERROR", "-"}},
+		{"aztec-1", []string{"WARN", "aztec-1", "mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (canonical)", "1 (medium)"}},
+		{"aztec-down", []string{"CRIT", "aztec-down", "-", "ERROR", "-", "-"}},
 	}
 	for _, r := range rows {
 		if cells := rowCells(t, got, r.node); !slices.Equal(cells, r.want) {
@@ -442,10 +514,14 @@ nodes:
 	for _, want := range []string{
 		`x3f_node_status{node="aztec-1"} 1`,
 		`x3f_node_status{node="aztec-down"} 2`,
+		`x3f_check_status{node="aztec-1",check="network"} 0`,
 		`x3f_check_status{node="aztec-1",check="version"} 1`,
+		`x3f_check_status{node="aztec-1",check="rollup"} 0`,
 		`x3f_check_status{node="aztec-1",check="advisories"} 0`,
 		`x3f_check_status{node="aztec-1",check="ignore_advisories"} 0`,
+		`x3f_check_status{node="aztec-down",check="network"} 3`,
 		`x3f_check_status{node="aztec-down",check="version"} 2`,
+		`x3f_check_status{node="aztec-down",check="rollup"} 3`,
 		`x3f_check_status{node="aztec-down",check="advisories"} 3`,
 		`x3f_client_info{node="aztec-1",component="node",client="aztec",version="6.0.0",build="release"} 1`,
 		`x3f_client_latest_info{client="aztec",version="6.1.0"} 1`,
@@ -491,8 +567,8 @@ nodes:
 	if code != exitWarn {
 		t.Errorf("exit code = %d, want %d\n%s", code, exitWarn, got)
 	}
-	if cells := rowCells(t, got, "aztec-1"); cells[3] != "none known" {
-		t.Errorf("advisories cell = %q, want %q", cells[3], "none known")
+	if cells := rowCells(t, got, "aztec-1"); cells[5] != "none known" {
+		t.Errorf("advisories cell = %q, want %q", cells[5], "none known")
 	}
 	for _, want := range []string{
 		`NOTE  aztec-1 advisories: 2 ignored advisories for Aztec 6.0.0 (ignore_advisories): GHSA-`,
@@ -1810,5 +1886,146 @@ func TestUpstreamInputsUseTheirRepositories(t *testing.T) {
 	}
 	if in.Releases != nodeReleases {
 		t.Error("advisoryInput does not check fixes against the releases of aztec-node")
+	}
+}
+
+// derivedNodeInfo returns the recorded mainnet getNodeInfo answer with
+// changed fields: change edits the "result" object.
+func derivedNodeInfo(t *testing.T, change func(result map[string]any)) []byte {
+	t.Helper()
+	var resp map[string]any
+	if err := json.Unmarshal(aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json"), &resp); err != nil {
+		t.Fatal(err)
+	}
+	change(resp["result"].(map[string]any))
+	out, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// TestRunAztecRollup checks the network and rollup checks of an Aztec node
+// end to end, with recorded L1 answers.
+func TestRunAztecRollup(t *testing.T) {
+	const key = "apikey0123456789secret" // gitleaks:allow (test dummy)
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	live := aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json")
+	// Derived: the mainnet rollup of v5 (docs/docs/networks.md in
+	// aztec-labs-eng/aztec-node at 1b6de149f4: Alpha 5.2.0, rollup
+	// 0x91fF…8E34, rollup version 4248422647), as a node that was not
+	// upgraded to v6 would report it.
+	oldRollup := derivedNodeInfo(t, func(r map[string]any) {
+		r["rollupVersion"] = 4248422647
+		r["l1ContractAddresses"].(map[string]any)["rollupAddress"] = "0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34"
+	})
+	// Derived: a registry that is no known network's.
+	unknownRegistry := derivedNodeInfo(t, func(r map[string]any) {
+		r["l1ContractAddresses"].(map[string]any)["registryAddress"] = "0x0000000000000000000000000000000000000001"
+	})
+	sepoliaL1 := newL1Node(t, map[string][]byte{"eth_chainId": l1Fixture(t, "eth_chainId-publicnode-sepolia.json")}, nil)
+
+	tests := []struct {
+		name     string
+		nodeInfo []byte
+		l1       string // l1_url
+		extra    string // more config for the Aztec node
+		wantRow  []string
+		want     []string // findings
+		metrics  map[string]int
+		noCalls  *l1Node // an L1 that must get no eth_call
+	}{
+		{
+			name: "canonical rollup", nodeInfo: live, l1: mainnetL1(t, nil).URL,
+			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (canonical)"},
+			metrics: map[string]int{"network": 0, "rollup": 0},
+		},
+		{
+			name: "old rollup", nodeInfo: oldRollup, l1: mainnetL1(t, nil).URL,
+			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "4248422647, canonical 2070860440"},
+			want: []string{"CRIT  aztec-1 rollup: node follows rollup version 4248422647 (0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34), " +
+				"but the canonical rollup is version 2070860440 (0xe37a2663cc9c119ba41572c40fab0bbb23a5402f): the network has moved on, upgrade the node"},
+			metrics: map[string]int{"network": 0, "rollup": 2},
+		},
+		{
+			// The node's registry is on mainnet; reading it on Sepolia
+			// would compare with another network's contracts.
+			name: "L1 on another chain", nodeInfo: live, l1: sepoliaL1.URL,
+			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (not checked)"},
+			want:    []string{`WARN  aztec-1 rollup: not checked: the l1_url endpoint is on sepolia, but the node's L1 is mainnet`},
+			metrics: map[string]int{"network": 0, "rollup": 3},
+			noCalls: sepoliaL1,
+		},
+		{
+			name: "L1 unreachable", nodeInfo: live, l1: "http://" + m.deadAddr + "/v3/" + key,
+			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (not checked)"},
+			want:    []string{"WARN  aztec-1 rollup: not checked: the l1_url endpoint failed: eth_chainId: connection failed"},
+			metrics: map[string]int{"network": 0, "rollup": 3},
+		},
+		{
+			name: "other network than configured", nodeInfo: live, l1: mainnetL1(t, nil).URL, extra: "    network: testnet\n",
+			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (canonical)"},
+			want:    []string{"CRIT  aztec-1 network: node is on mainnet, expected testnet"},
+			metrics: map[string]int{"network": 2, "rollup": 0},
+		},
+		{
+			name: "unknown network", nodeInfo: unknownRegistry, l1: mainnetL1(t, nil).URL,
+			wantRow: []string{"?", "Aztec 6.0.0 -> 6.1.0", "2070860440 (not checked)"},
+			want: []string{
+				"WARN  aztec-1 network: unknown network (L1 mainnet, registry 0x0000000000000000000000000000000000000001): not one of mainnet, testnet",
+				"WARN  aztec-1 rollup: not checked: reading the registry through the l1_url endpoint failed: getCanonicalRollup: unexpected HTTP status 404 Not Found",
+			},
+			metrics: map[string]int{"network": 1, "rollup": 3},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			node := mockClient(t, map[string][]byte{"aztec_getNodeInfo": tt.nodeInfo})
+			path := writeConfig(t, `
+nodes:
+  - name: aztec-1
+    type: aztec
+    url: `+node.URL+`
+    l1_url: `+tt.l1+`
+`+tt.extra)
+			metricsFile := filepath.Join(t.TempDir(), "x3f.prom")
+			var out bytes.Buffer
+			run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir(), "-metrics-file", metricsFile},
+				&out, &out, testEnv(gh, now))
+			got := out.String()
+			if cells := rowCells(t, got, "aztec-1"); !slices.Equal(cells[2:5], tt.wantRow) {
+				t.Errorf("row %q, want NETWORK, VERSION, ROLLUP %q", cells, tt.wantRow)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("output does not contain %q:\n%s", w, got)
+				}
+			}
+			for _, check := range []string{"network", "rollup"} {
+				if !slices.ContainsFunc(tt.want, func(w string) bool { return strings.Contains(w, "aztec-1 "+check+":") }) &&
+					strings.Contains(got, "aztec-1 "+check+":") {
+					t.Errorf("unexpected %s finding:\n%s", check, got)
+				}
+			}
+			data, err := os.ReadFile(metricsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for check, v := range tt.metrics {
+				want := fmt.Sprintf("x3f_check_status{node=\"aztec-1\",check=%q} %d\n", check, v)
+				if !strings.Contains(string(data), want) {
+					t.Errorf("metrics lack %q", want)
+				}
+			}
+			if tt.noCalls != nil && tt.noCalls.ethCalls.Load() != 0 {
+				t.Errorf("%d eth_call requests to an L1 on another chain", tt.noCalls.ethCalls.Load())
+			}
+			for _, secret := range []string{key, m.deadAddr, "127.0.0.1", "http://"} {
+				if strings.Contains(got+string(data), secret) {
+					t.Errorf("output leaks %q:\n%s", secret, got)
+				}
+			}
+		})
 	}
 }

@@ -232,19 +232,20 @@ nodes:
     type: aztec
     url: http://localhost:8080      # the node's JSON-RPC endpoint
     l1: eth-mainnet-1               # the Ethereum node above
+    network: mainnet                # optional: expected network (mainnet, testnet)
   - name: aztec-2
     type: aztec
     url: http://aztec-2:8080
     l1_url: https://eth.example.com/v3/<key>   # or: an L1 provider endpoint
 ```
 
-Set exactly one of `l1` and `l1_url`. `l1` names an Ethereum node of the same config; x3f checks that node as usual. `l1_url` is for an L1 provider: x3f will only read the Aztec contracts through it and does not check it as an Ethereum node, so a provider's load balancer does not turn the Aztec node yellow. The L1 is validated now but used only by the upcoming checks (network, rollup version, upgrade readiness). Like all URLs, `url` and `l1_url` are never printed. The fields of one node type are not allowed on the other (for example `execution_url` on an Aztec node).
+Set exactly one of `l1` and `l1_url`. `l1` names an Ethereum node of the same config; x3f checks that node as usual and reads the Aztec contracts through its `execution_url`. `l1_url` is for an L1 provider: x3f only reads the Aztec contracts through it and does not check it as an Ethereum node, so a provider's load balancer does not turn the Aztec node yellow. Like all URLs, `url` and `l1_url` are never printed. The fields of one node type are not allowed on the other (for example `execution_url` on an Aztec node).
 
-x3f calls `aztec_getNodeInfo` (read-only); a node older than v5, which does not know it, is asked with `node_getNodeInfo`. Aztec nodes get a table of their own:
+x3f calls `aztec_getNodeInfo` on the node (a node older than v5, which does not know it, is asked with `node_getNodeInfo`), and `eth_chainId` and `eth_call` on the L1, all read-only. Aztec nodes get a table of their own:
 
 ```
-STATUS  NODE     VERSION               ADVISORIES
-WARN    aztec-1  Aztec 6.0.0 -> 6.1.0  1 (medium)
+STATUS  NODE     NETWORK  VERSION               ROLLUP                  ADVISORIES
+WARN    aztec-1  mainnet  Aztec 6.0.0 -> 6.1.0  2070860440 (canonical)  1 (medium)
 
 Findings:
   WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 3 days ago (grace period 30 days)
@@ -257,6 +258,13 @@ Status: WARN (0 OK, 1 WARN, 0 CRIT)
 
 (Real output from 2026-11-27 against the public Aztec mainnet endpoint of drpc.)
 
+| | Green | Yellow | Red |
+|---|---|---|---|
+| **Network** | a known network (mainnet or testnet, by the node's L1 chain and registry), and the configured one if `network:` is set | an unknown network | another network than configured |
+| **Rollup** | the node follows the canonical rollup, the one its registry on L1 names as current | not checked, with the reason: the L1 is unreachable, a read failed, or the L1 is on another chain than the node's L1 (the check is reported as unknown) | the node follows another rollup, for example after a network upgrade it did not follow |
+
+x3f reads the registry through its own L1 access (`l1` or `l1_url`); which L1 endpoint the node itself uses, x3f cannot see. If that access is on another chain than the node's L1, x3f does not compare: it would read another network's registry.
+
 The [status rules](#status-rules) for version and advisories are the same as for Ethereum clients:
 
 - **Releases** come from [`aztec-labs-eng/aztec-node`](https://github.com/aztec-labs-eng/aztec-node/releases), where the node is released since v6. The aztec-packages monorepo publishes releases with the same numbers for Barretenberg, bb.js and the L1 contracts, sometimes days earlier; they are not node releases. Only a plain version such as `6.1.0` is a stable release. `rc.N` is a pre-release; `nightly`, `dev` and `commit` builds are dev builds; any other suffix (for example `devnet` or `private`) is unrecognized. All of them are yellow on a node and never count as the latest release, even where GitHub does not mark them as pre-releases.
@@ -265,7 +273,7 @@ The [status rules](#status-rules) for version and advisories are the same as for
 
 Known limitations:
 
-- **Version and advisories only.** Network, sync status and upgrade readiness of Aztec nodes are not checked yet.
+- **No sync status and upgrade readiness yet.** Whether the node keeps up with L1 and whether a pending governance proposal will move the network to a new rollup are not checked yet.
 - **Security releases without an advisory are not recognized as urgent.** aztec-node v6.1.0 is a security release, but no GitHub advisory was published for it, so it counts like any other release: yellow within the grace period. x3f adds a note when the release notes of a missing newer release contain the word "security", but the word alone does not change the status.
 - **Node releases before v6 are not in aztec-node.** For a node older than 6.0.0, "first newer release" is 6.0.0, not the real successor (such as 5.2.1). The status is still right: v6 is a new network, and such a node is far beyond the grace period.
 
@@ -323,7 +331,7 @@ The file is written atomically (a temporary file in the same directory, then ren
 | Metric | Labels | Value |
 |---|---|---|
 | `x3f_node_status` | `node` | 0 OK, 1 WARN, 2 CRIT |
-| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories`; for Aztec nodes `version`, `advisories`, `ignore_advisories` |
+| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories`; for Aztec nodes `network`, `version`, `rollup`, `advisories`, `ignore_advisories` |
 | `x3f_client_info` | `node`, `component`, `client`, `version`, `build` | 1; `component` is `execution` or `consensus` (Ethereum) or `node` (Aztec, `client="aztec"`); `build` is `release`, `prerelease`, `dev` or `unknown` |
 | `x3f_client_latest_info` | `client`, `version` | 1, the highest stable release known from GitHub |
 | `x3f_advisories` | `node`, `component`, `severity` | number of published advisories that affect the client and are not ignored; `severity` is `critical`, `high`, `medium`, `low` or `none` |

@@ -33,11 +33,12 @@ nodes:
     # network anyway; if this is set, a node on another network is critical.
     network: mainnet
 
-  # An Aztec node (version and security advisories; see "Aztec nodes" in
-  # the README). Its L1 is either an Ethereum node of this config (l1) or
-  # a provider endpoint (l1_url); set exactly one of them.
+  # An Aztec node (network, rollup, version and security advisories; see
+  # "Aztec nodes" in the README). Its L1 is either an Ethereum node of this
+  # config (l1) or a provider endpoint (l1_url); set exactly one of them.
   # - name: aztec-1
   #   type: aztec
   #   url: http://localhost:8080      # the node's JSON-RPC endpoint
   #   l1: mainnet-1
   #   # l1_url: https://eth.example.com/v3/<key>
+  #   network: mainnet                # optional: mainnet or testnet

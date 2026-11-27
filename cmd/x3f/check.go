@@ -160,8 +160,9 @@ type layerFindings struct {
 	name string
 	status.Assessment
 	// notRun is set if the check could not run, e.g. the sync status of
-	// an unreachable client. Its level is then OK with no findings; the
-	// metrics report it as unknown.
+	// an unreachable client. Its level is usually OK with no findings; a
+	// check can also say why it did not run, as a finding with its own
+	// level. The metrics report it as unknown either way.
 	notRun bool
 }
 

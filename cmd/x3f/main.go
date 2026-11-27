@@ -1,7 +1,8 @@
 // Command x3f reports whether Ethereum node clients are up to date,
 // in sync, affected by known advisories and ready for the next hard fork,
-// whether Aztec nodes are up to date and affected by known advisories,
-// and sends a Telegram message when a node's status changes.
+// whether Aztec nodes follow their network's rollup, are up to date and
+// affected by known advisories, and sends a Telegram message when a node's
+// status changes.
 package main
 
 import (
@@ -45,8 +46,10 @@ are ready for the next fork: the node's own fork schedule (eth_config,
 client does not report it, its version is compared with the announced
 releases.
 
-Aztec nodes (type: aztec) are checked for their version (aztec_getNodeInfo)
-and the published GitHub security advisories of aztec-packages.
+Aztec nodes (type: aztec) are checked for their network, whether they follow
+the canonical rollup of their registry on L1 (read through the l1 node or
+l1_url), their version (aztec_getNodeInfo) and the published GitHub security
+advisories of aztec-packages.
 
 With a telegram section in the config, x3f sends a Telegram message when a
 node's status changes (see -state-file). With -metrics-file, it writes
@@ -202,7 +205,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 
 	nodes := make([]checker, len(cfg.Nodes))
 	for i, n := range cfg.Nodes {
-		nodes[i] = newChecker(n, e.clients)
+		nodes[i] = newChecker(n, cfg.Nodes, e.clients)
 	}
 	queryAll(ctx, nodes, *timeout)
 

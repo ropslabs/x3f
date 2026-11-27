@@ -88,14 +88,15 @@ type clients struct {
 	aztec    *aztec.Client
 }
 
-// newChecker returns the checker for a node. config.Validate has already
-// rejected unknown types.
-func newChecker(n config.Node, c clients) checker {
+// newChecker returns the checker for a node; nodes is the whole config,
+// for references between nodes. config.Validate has already rejected
+// unknown types and references.
+func newChecker(n config.Node, nodes []config.Node, c clients) checker {
 	switch n.Type {
 	case config.TypeEthereum:
 		return &ethereumNode{cfg: n, client: c.ethereum}
 	case config.TypeAztec:
-		return &aztecNode{cfg: n, client: c.aztec}
+		return newAztecNode(n, nodes, c.aztec)
 	}
 	// Unreachable after validation; a panic shows a missing case at once.
 	panic(fmt.Sprintf("node %q: no checker for type %q", n.Name, n.Type))
