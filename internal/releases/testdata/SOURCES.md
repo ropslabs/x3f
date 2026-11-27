@@ -69,6 +69,15 @@ HTTP headers and no tokens**.
 | Consensys-Incorporated/teku | 1 |
 | erigontech/erigon | 1 |
 | paradigmxyz/reth, NethermindEth/nethermind, lambdaclass/ethrex, OffchainLabs/prysm, status-im/nimbus-eth2, grandinetech/grandine | 0 (`[]`) |
+| AztecProtocol/aztec-packages | 3 (recorded 2026-11-27, same request and trimming) |
+
+The Aztec advisories name npm and Rust packages (`@aztec/bb.js`,
+`@aztec-foundation/bb.js`, `barretenberg-rs`, and `@aztec/archiver
+@aztec/stdlib` as one name) with ranges that contain nightly, devnet and
+spartan versions, e.g. `>= 6.0.0-nightly.20260721, < 7.0.0-0` with an
+empty `patched_versions` (GHSA-73xc-j27q-wg75). GHSA-778c-2h5c-8r96 has a
+free-text range, `current Ignition mainnet release (v4 tag)`, patched
+`> v5.0.0-rc.1`; x3f cannot decide it.
 
 Range spellings in this data that the parser relies on (all real):
 

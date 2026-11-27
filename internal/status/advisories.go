@@ -16,14 +16,17 @@ import (
 // Advisory rules (agreed for build step 5):
 //
 //	red:    affected by a critical or high advisory whose fix is released
-//	yellow: affected by a medium or low advisory, or one without severity;
-//	        affected by an advisory without a released fix ("no fix
+//	yellow: affected by a medium or low advisory, or one without severity,
+//	        whose fix is released; affected by a critical or high advisory
+//	        (or one without severity) without a released fix ("no fix
 //	        released yet, check the advisory for mitigations");
 //	        advisories unknown or data older than 7 days
-//	note:   an advisory x3f cannot decide ("all" without a fix); GitHub
-//	        not reachable, cached data younger than 7 days; advisories
-//	        ignored in the config (they do not count otherwise); an
-//	        expired ignore entry (the advisory counts again)
+//	note:   affected by a medium or low advisory without a released fix
+//	        (the operator cannot act on it; it still counts in the cell
+//	        and the metrics); an advisory x3f cannot decide ("all" without
+//	        a fix); GitHub not reachable, cached data younger than 7 days;
+//	        advisories ignored in the config (they do not count otherwise);
+//	        an expired ignore entry (the advisory counts again)
 //
 // There is no grace period: a published advisory with a released fix is
 // exactly what x3f is meant to find.
@@ -149,9 +152,26 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 		r.add(level, "%s is affected by %s, fixed in %s or later: %s; %s",
 			name, countAdvisories(fixed, ""), fix, listAdvisories(fixed), link)
 	}
-	if len(unfixed) > 0 {
-		r.add(Warn, "%s is affected by %s: no fix released yet, check the advisory for mitigations: %s; %s",
-			name, countAdvisories(unfixed, " without a released fix"), listAdvisories(unfixed), link)
+	// Without a fix there is no update to install. Severe advisories stay
+	// yellow, as mitigations may be needed; medium and low ones are a
+	// note, or a node would stay yellow with nothing the operator can do.
+	// Without a severity x3f cannot tell, so it stays yellow.
+	var unfixedSevere, unfixedMinor []affectedBy
+	for _, u := range unfixed {
+		if rank := severityRank(u.adv.Severity); rank > 0 && rank < severityRank("high") {
+			unfixedMinor = append(unfixedMinor, u)
+		} else {
+			unfixedSevere = append(unfixedSevere, u)
+		}
+	}
+	for _, g := range []struct {
+		level Level
+		list  []affectedBy
+	}{{Warn, unfixedSevere}, {OK, unfixedMinor}} {
+		if len(g.list) > 0 {
+			r.add(g.level, "%s is affected by %s: no fix released yet, check the advisory for mitigations: %s; %s",
+				name, countAdvisories(g.list, " without a released fix"), listAdvisories(g.list), link)
+		}
 	}
 	// Notes last: they matter less than what is known to affect the node.
 	for _, e := range expired {

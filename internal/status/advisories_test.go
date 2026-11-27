@@ -159,12 +159,22 @@ func TestAssessAdvisoriesFixNotReleased(t *testing.T) {
 		Releases:   &releases.Result{Releases: before, FetchedAt: now},
 		Now:        now,
 	})
-	if r.Level != Warn || r.Cell != "4 (high)" || len(r.Findings) != 1 {
-		t.Fatalf("level %v, cell %q, %d findings; want WARN, \"4 (high)\", 1", r.Level, r.Cell, len(r.Findings))
+	// All four still count in the cell; only the high one is yellow, the
+	// medium and low ones without a fix are a note.
+	if r.Level != Warn || r.Cell != "4 (high)" || len(r.Findings) != 2 {
+		t.Fatalf("level %v, cell %q, %d findings; want WARN, \"4 (high)\", 2", r.Level, r.Cell, len(r.Findings))
 	}
-	want := "Lighthouse 8.2.1 is affected by 4 published advisories without a released fix (1 high, 2 medium, 1 low): no fix released yet, check the advisory for mitigations: "
-	if !strings.HasPrefix(r.Findings[0].Message, want) {
-		t.Errorf("finding = %q\nwant prefix %q", r.Findings[0].Message, want)
+	want := []struct {
+		level  Level
+		prefix string
+	}{
+		{Warn, "Lighthouse 8.2.1 is affected by 1 published advisory without a released fix (1 high): no fix released yet, check the advisory for mitigations: "},
+		{OK, "Lighthouse 8.2.1 is affected by 3 published advisories without a released fix (2 medium, 1 low): no fix released yet, check the advisory for mitigations: "},
+	}
+	for i, w := range want {
+		if f := r.Findings[i]; f.Level != w.level || !strings.HasPrefix(f.Message, w.prefix) {
+			t.Errorf("finding %d = %v %q\nwant %v, prefix %q", i, f.Level, f.Message, w.level, w.prefix)
+		}
 	}
 }
 
@@ -193,6 +203,18 @@ func TestAssessAdvisoriesRules(t *testing.T) {
 			in:    AdvisoryInput{Version: geth, Advisories: result(adv("GHSA-a", "critical", ">= 1.0.0", ""))},
 			level: Warn, cell: "1 (critical)",
 			want: []string{"1 published advisory without a released fix (1 critical): no fix released yet, check the advisory for mitigations: GHSA-a (critical: \"title of GHSA-a\")"},
+		},
+		{
+			name:  "low without fix is a note",
+			in:    AdvisoryInput{Version: geth, Advisories: result(adv("GHSA-g", "low", ">= 1.0.0", ""))},
+			level: OK, cell: "1 (low)",
+			want: []string{"1 published advisory without a released fix (1 low): no fix released yet, check the advisory for mitigations: GHSA-g (low: \"title of GHSA-g\")"},
+		},
+		{
+			name:  "missing severity without fix stays yellow",
+			in:    AdvisoryInput{Version: geth, Advisories: result(adv("GHSA-h", "", ">= 1.0.0", ""))},
+			level: Warn, cell: "1",
+			want: []string{"1 published advisory without a released fix (1 no severity): no fix released yet"},
 		},
 		{
 			name:  "missing severity is yellow",
@@ -461,5 +483,43 @@ func TestAssessAdvisoriesCounts(t *testing.T) {
 	r = AssessAdvisories(AdvisoryInput{Version: v, AdvisoriesErr: errors.New("down"), Now: now})
 	if r.Counts != nil {
 		t.Errorf("counts without data = %v, want nil", r.Counts)
+	}
+}
+
+// GHSA-73xc-j27q-wg75 (medium) affects every Aztec 6.x release and names no
+// fix for that line (recorded data, see internal/releases/testdata). A
+// medium advisory without a fix is a note: the operator cannot update, so
+// the node must not stay yellow. It still counts in the cell.
+//
+// Aztec is not a software entry of its own yet; Geth stands in as the
+// client, which only selects the generic suffix rules that apply to these
+// ranges ("nightly" is a dev build, "-0" a release).
+func TestAssessAdvisoriesMediumWithoutFixIsNote(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	advs := recorded[releases.Advisory](t, "advisories", "AztecProtocol_aztec-packages.json")
+	for _, running := range []string{"6.0.0", "6.1.0"} {
+		t.Run(running, func(t *testing.T) {
+			r := AssessAdvisories(AdvisoryInput{
+				Version:    ethereum.ClientVersion{Raw: running, Client: ethereum.Geth, Version: running},
+				Advisories: &releases.AdvisoryResult{Advisories: advs, FetchedAt: now},
+				Now:        now,
+			})
+			if r.Level != OK || r.Cell != "1 (medium)" || r.Counts["medium"] != 1 {
+				t.Errorf("level %v, cell %q, counts %v; want OK, \"1 (medium)\", 1 medium", r.Level, r.Cell, r.Counts)
+			}
+			want := []string{
+				"Geth " + running + " is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: ",
+				// The free-text range of GHSA-778c-2h5c-8r96.
+				"cannot tell whether Geth " + running + " is affected by GHSA-778c-2h5c-8r96",
+			}
+			if len(r.Findings) != len(want) {
+				t.Fatalf("findings %v, want %d", r.Findings, len(want))
+			}
+			for i, w := range want {
+				if f := r.Findings[i]; f.Level != OK || !strings.HasPrefix(f.Message, w) {
+					t.Errorf("finding %d = %v %q\nwant NOTE, prefix %q", i, f.Level, f.Message, w)
+				}
+			}
+		})
 	}
 }

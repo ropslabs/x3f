@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
@@ -207,11 +208,14 @@ func TestAdvisoryCheckEdgeCases(t *testing.T) {
 }
 
 // TestRecordedRangesAreUnderstood makes sure every range and patched
-// version in the recorded advisories is understood. The only advisory
-// x3f cannot decide is Besu's "all" without a fix.
+// version in the recorded advisories is understood, except the free-text
+// entry of Aztec's GHSA-778c-2h5c-8r96 (range and patched version). The
+// advisories x3f cannot decide are Besu's "all" without a fix and that
+// Aztec advisory.
 func TestRecordedRangesAreUnderstood(t *testing.T) {
+	freeText := "current Ignition mainnet release (v4 tag)"
 	files, err := filepath.Glob(filepath.Join("testdata", "github", "advisories", "*.json"))
-	if err != nil || len(files) != 12 {
+	if err != nil || len(files) != 13 {
 		t.Fatalf("found %d fixture files, err %v", len(files), err)
 	}
 	var unclear []string
@@ -228,10 +232,10 @@ func TestRecordedRangesAreUnderstood(t *testing.T) {
 		for _, a := range advs {
 			total++
 			for _, e := range a.Vulnerabilities {
-				if _, ok := ParseRange(e.VulnerableVersionRange); !ok {
+				if _, ok := ParseRange(e.VulnerableVersionRange); ok == (e.VulnerableVersionRange == freeText) {
 					t.Errorf("%s: range %q not understood", a.GHSAID, e.VulnerableVersionRange)
 				}
-				if _, ok := parseFixes(e.PatchedVersions); !ok {
+				if _, ok := parseFixes(e.PatchedVersions); !ok && e.VulnerableVersionRange != freeText {
 					t.Errorf("%s: patched %q not understood", a.GHSAID, e.PatchedVersions)
 				}
 			}
@@ -240,10 +244,11 @@ func TestRecordedRangesAreUnderstood(t *testing.T) {
 			}
 		}
 	}
-	if total != 74 {
-		t.Errorf("checked %d advisories, want 74", total)
+	if total != 77 {
+		t.Errorf("checked %d advisories, want 77", total)
 	}
-	if len(unclear) != 1 || unclear[0] != "GHSA-v5gq-r843-8f73" {
-		t.Errorf("unclear advisories = %v, want only GHSA-v5gq-r843-8f73", unclear)
+	slices.Sort(unclear)
+	if want := []string{"GHSA-778c-2h5c-8r96", "GHSA-v5gq-r843-8f73"}; !slices.Equal(unclear, want) {
+		t.Errorf("unclear advisories = %v, want %v", unclear, want)
 	}
 }
