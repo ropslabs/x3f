@@ -205,7 +205,7 @@ func versions(m map[string]string, label string, fail func(string, ...any)) map[
 	out := make(map[software.Name]releases.Version, len(m))
 	for client, raw := range m {
 		c := software.Name(client)
-		if _, ok := software.RepoFor(c); !ok {
+		if _, ok := software.ReleaseRepo(c); !ok {
 			fail("%s: unknown client %q", label, client)
 			continue
 		}

@@ -46,7 +46,9 @@ type AdvisoryInput struct {
 	Advisories *releases.AdvisoryResult
 	// AdvisoriesErr explains why Advisories is nil.
 	AdvisoriesErr error
-	// Releases, if known, is used to check that a fix is released.
+	// Releases, if known, are the software's own releases (not
+	// necessarily of the advisory's repository); they are used to check
+	// that a fix is released.
 	Releases *releases.Result
 	// Ignore is the node's ignore list (global and node entries merged).
 	Ignore []config.AdvisoryIgnore
@@ -82,7 +84,7 @@ type affectedBy struct {
 func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 	var r AdvisoryResult
 	v := in.Version
-	repo, known := software.RepoFor(v.Name)
+	repo, known := software.AdvisoryRepo(v.Name)
 	if in.Err != nil || !known || !v.HasVersion() {
 		return r
 	}

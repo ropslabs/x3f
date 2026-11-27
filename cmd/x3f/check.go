@@ -47,23 +47,25 @@ type (
 // fetchReleases fetches the releases of every piece of software that was
 // detected, once per repository and concurrently.
 func fetchReleases(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[software.Repo]releaseData {
-	return fetchPerRepo(ctx, nodes, timeout, src.Releases)
+	return fetchPerRepo(ctx, nodes, timeout, software.ReleaseRepo, src.Releases)
 }
 
 // fetchAdvisories fetches the security advisories the same way.
 func fetchAdvisories(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[software.Repo]advisoryData {
-	return fetchPerRepo(ctx, nodes, timeout, src.Advisories)
+	return fetchPerRepo(ctx, nodes, timeout, software.AdvisoryRepo, src.Advisories)
 }
 
 // fetchPerRepo calls fetch once for the repository of every detected piece
-// of software, concurrently. fetch is a method value such as src.Releases;
-// Go infers T from its result type.
+// of software, concurrently; repoOf picks the repository (releases or
+// advisories). fetch is a method value such as src.Releases; Go infers T
+// from its result type.
 func fetchPerRepo[T any](ctx context.Context, nodes []checker, timeout time.Duration,
+	repoOf func(software.Name) (software.Repo, bool),
 	fetch func(context.Context, software.Repo) (T, error)) map[software.Repo]repoData[T] {
 
 	var repos []software.Repo
 	for _, s := range allInstalled(nodes) {
-		if repo, ok := software.RepoFor(s.version.Name); ok && !slices.Contains(repos, repo) {
+		if repo, ok := repoOf(s.version.Name); ok && !slices.Contains(repos, repo) {
 			repos = append(repos, repo)
 		}
 	}
@@ -99,7 +101,7 @@ func refreshIfAhead(ctx context.Context, src *releases.Source, nodes []checker, 
 	var stale []software.Repo
 	for _, s := range allInstalled(nodes) {
 		v := s.version
-		repo, ok := software.RepoFor(v.Name)
+		repo, ok := software.ReleaseRepo(v.Name)
 		d := rel[repo]
 		if !ok || d.result == nil || !d.result.Cached || slices.Contains(stale, repo) {
 			continue
@@ -252,7 +254,7 @@ func checkIgnoreList(entries []config.AdvisoryIgnore, sw []installed, adv map[so
 	var names []string
 	for _, s := range sw {
 		v := s.version
-		repo, ok := software.RepoFor(v.Name)
+		repo, ok := software.AdvisoryRepo(v.Name)
 		if !ok || adv[repo].result == nil {
 			return status.Assessment{}, false
 		}

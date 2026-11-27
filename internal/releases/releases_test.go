@@ -35,17 +35,28 @@ func TestEveryClientHasRepoAndFixture(t *testing.T) {
 		software.Aztec,
 	}
 	for _, c := range clients {
-		repo, ok := software.RepoFor(c)
+		repo, ok := software.ReleaseRepo(c)
 		if !ok {
-			t.Errorf("no repository for %s", c)
+			t.Errorf("no release repository for %s", c)
 			continue
 		}
 		if _, err := os.Stat(fixturePath(repo)); err != nil {
-			t.Errorf("no fixture for %s (%s)", c, repo)
+			t.Errorf("no release fixture for %s (%s)", c, repo)
+		}
+		repo, ok = software.AdvisoryRepo(c)
+		if !ok {
+			t.Errorf("no advisory repository for %s", c)
+			continue
+		}
+		if _, err := os.Stat(filepath.Join("testdata", "github", "advisories", repo.Owner+"_"+repo.Name+".json")); err != nil {
+			t.Errorf("no advisory fixture for %s (%s)", c, repo)
 		}
 	}
-	if _, ok := software.RepoFor(software.Unknown); ok {
-		t.Error("unknown client must not have a repository")
+	if _, ok := software.ReleaseRepo(software.Unknown); ok {
+		t.Error("unknown client must not have a release repository")
+	}
+	if _, ok := software.AdvisoryRepo(software.Unknown); ok {
+		t.Error("unknown client must not have an advisory repository")
 	}
 }
 
@@ -70,16 +81,24 @@ func TestLatestStableFromRecordedReleases(t *testing.T) {
 		{software.Nimbus, "26.10.2"}, // "nightly" tag is ignored
 		{software.Lodestar, "1.51.0"},
 		{software.Grandine, "2.0.6"}, // 3.0.0-rc.4 is a pre-release
-		{software.Aztec, "6.1.0"},    // v0.0.1-private is not flagged, but not a release either
+		{software.Aztec, "6.1.0"},    // aztec-node: v6.0.0-rc.1 is a flagged pre-release
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.client), func(t *testing.T) {
-			repo, _ := software.RepoFor(tt.client)
+			repo, _ := software.ReleaseRepo(tt.client)
 			got, ok := LatestStable(tt.client, loadFixture(t, repo))
 			if !ok || got.String() != tt.want {
 				t.Errorf("LatestStable = %s, %v; want %s", got, ok, tt.want)
 			}
 		})
+	}
+
+	// The aztec-packages monorepo published the node until v5 and shows
+	// every Aztec channel. Its v0.0.1-private release is not flagged as a
+	// pre-release, but the Aztec rules do not take it as stable.
+	monorepo := loadFixture(t, software.Repo{Owner: "AztecProtocol", Name: "aztec-packages"})
+	if got, ok := LatestStable(software.Aztec, monorepo); !ok || got.String() != "6.1.0" {
+		t.Errorf("LatestStable(aztec-packages) = %s, %v; want 6.1.0", got, ok)
 	}
 }
 
@@ -148,11 +167,11 @@ func TestStableFilter(t *testing.T) {
 }
 
 func TestFirstMissing(t *testing.T) {
-	repo, _ := software.RepoFor(software.Geth)
+	repo, _ := software.ReleaseRepo(software.Geth)
 	geth := loadFixture(t, repo)
-	repo, _ = software.RepoFor(software.Lighthouse)
+	repo, _ = software.ReleaseRepo(software.Lighthouse)
 	lighthouse := loadFixture(t, repo)
-	repo, _ = software.RepoFor(software.Aztec)
+	repo, _ = software.ReleaseRepo(software.Aztec)
 	aztec := loadFixture(t, repo)
 
 	tests := []struct {
@@ -171,8 +190,13 @@ func TestFirstMissing(t *testing.T) {
 		// v8.4.0-rc.0 pre-release (flagged) must not count as missing.
 		{"lighthouse rc of latest", software.Lighthouse, lighthouse, "8.3.3-rc.1", "v8.3.3", "2026-11-09T07:12:58Z"},
 		{"lighthouse up to date", software.Lighthouse, lighthouse, "8.3.3", "", ""},
-		{"aztec one release behind", software.Aztec, aztec, "6.0.0", "v6.1.0", "2026-11-19T10:59:01Z"},
+		// The node release of aztec-node, not the aztec-packages release
+		// of the same number five days earlier.
+		{"aztec one release behind", software.Aztec, aztec, "6.0.0", "v6.1.0", "2026-11-24T08:36:18Z"},
 		{"aztec up to date", software.Aztec, aztec, "6.1.0", "", ""},
+		// aztec-node has no releases before v6.
+		{"aztec before v6", software.Aztec, aztec, "5.2.0", "v6.0.0", "2026-10-22T11:28:30Z"},
+		{"aztec rc of the first release", software.Aztec, aztec, "6.0.0-rc.1", "v6.0.0", "2026-10-22T11:28:30Z"},
 		// A nightly of the next version is ahead of every release.
 		{"aztec nightly ahead", software.Aztec, aztec, "6.2.0-nightly.20261126", "", ""},
 	}
@@ -197,7 +221,7 @@ func TestFirstMissing(t *testing.T) {
 }
 
 func TestNewestKnown(t *testing.T) {
-	repo, _ := software.RepoFor(software.Lighthouse)
+	repo, _ := software.ReleaseRepo(software.Lighthouse)
 	rels := loadFixture(t, repo)
 	// The recorded Lighthouse data contains the pre-release v8.4.0-rc.0,
 	// newer than the latest stable v8.3.3.

@@ -9,7 +9,7 @@ GET https://api.github.com/repos/{owner}/{repo}/releases?per_page=100
 ```
 
 without authentication. File names are `{owner}_{repo}.json` with the
-**current** repository path (see `repos` in `releases.go`); three requests
+**current** repository path (see `repos` in `internal/software/software.go`); three requests
 were answered via redirect from the old path:
 
 | Requested | Served from |
@@ -31,7 +31,15 @@ latest stable release is `v31.0.0`).
 `v6.1.0`). Its tags show the Aztec channels: plain `x.y.z` (stable),
 `-rc.N`, `-nightly.<date>` and `-nightly.<date>-N`, `-dev`,
 `-commit.<hash>`, `-devnet.N-patch.N` and `v0.0.1-private`, which is **not**
-flagged as a pre-release.
+flagged as a pre-release. Since v6 the node is no longer released there; x3f
+reads the releases of `aztec-labs-eng/aztec-node` (see below). The file stays
+as test data for the Aztec suffix rules.
+
+`aztec-labs-eng_aztec-node.json` was recorded the same way on 2026-11-27 at
+12:03 UTC: all 3 releases, `v6.1.0` (2026-11-24), `v6.0.0` and the flagged
+pre-release `v6.0.0-rc.1`. Source of the repository change: the operator
+changelog of v6 (`docs/docs-operate/operators/reference/changelog/v6.md` in
+aztec-labs-eng/aztec-node at commit 1b6de149f4, table "Source repository").
 
 Order and number of releases are unchanged (100 per repository; Grandine has
 only 28 releases in total).

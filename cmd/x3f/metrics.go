@@ -69,7 +69,7 @@ func buildMetrics(nodes []checker, rows []row, rel map[software.Repo]releaseData
 				{Name: "version", Value: plainVersion(running)}, {Name: "build", Value: buildLabel(software.ClassifySuffix(v.Name, v.Suffix))},
 			}, Value: 1})
 
-			if repo, ok := software.RepoFor(v.Name); ok && rel[repo].result != nil && !slices.Contains(latestDone, v.Name) {
+			if repo, ok := software.ReleaseRepo(v.Name); ok && rel[repo].result != nil && !slices.Contains(latestDone, v.Name) {
 				latestDone = append(latestDone, v.Name)
 				if latest, ok := releases.LatestStable(v.Name, rel[repo].result.Releases); ok {
 					latestInfo.Samples = append(latestInfo.Samples, metrics.Sample{Labels: []metrics.Label{

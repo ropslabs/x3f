@@ -59,7 +59,7 @@ type upstream struct {
 // reported (err is the error of the request).
 func (up upstream) versionInput(v software.Reported, err error, p assessParams) status.VersionInput {
 	in := status.VersionInput{Version: v, Err: err, Now: p.now, Grace: p.grace}
-	if repo, ok := software.RepoFor(v.Name); ok {
+	if repo, ok := software.ReleaseRepo(v.Name); ok {
 		d := up.rel[repo]
 		in.Releases, in.ReleasesErr = d.result, d.err
 	}
@@ -67,12 +67,15 @@ func (up upstream) versionInput(v software.Reported, err error, p assessParams) 
 }
 
 // advisoryInput is the input of status.AssessAdvisories, with the merged
-// ignore list of the node.
+// ignore list of the node. Whether a fix is released is checked against
+// the software's own releases: those are what an operator can install.
 func (up upstream) advisoryInput(v software.Reported, err error, ignore []config.AdvisoryIgnore, p assessParams) status.AdvisoryInput {
 	in := status.AdvisoryInput{Version: v, Err: err, Ignore: ignore, Now: p.now}
-	if repo, ok := software.RepoFor(v.Name); ok {
+	if repo, ok := software.AdvisoryRepo(v.Name); ok {
 		d := up.adv[repo]
 		in.Advisories, in.AdvisoriesErr = d.result, d.err
+	}
+	if repo, ok := software.ReleaseRepo(v.Name); ok {
 		in.Releases = up.rel[repo].result
 	}
 	return in

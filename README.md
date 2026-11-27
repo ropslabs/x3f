@@ -80,7 +80,7 @@ x3f asks GitHub for the latest releases and security advisories and caches the a
 | Execution clients | Geth, Reth, Nethermind, Erigon, Besu, Ethrex |
 | Consensus clients | Lighthouse, Prysm, Teku, Nimbus, Lodestar, Grandine |
 | Networks | mainnet, Sepolia, Hoodi |
-| Aztec | node version and advisories of [aztec-packages](https://github.com/AztecProtocol/aztec-packages) (see [Aztec nodes](#aztec-nodes)) |
+| Aztec | node version (releases of [aztec-node](https://github.com/aztec-labs-eng/aztec-node)) and advisories of [aztec-packages](https://github.com/AztecProtocol/aztec-packages) (see [Aztec nodes](#aztec-nodes)) |
 
 The fork schedule is built into x3f. To get new fork dates, update x3f; x3f adds a note when its fork data is older than 30 days. Until a new release is out, you can pass your own schedule with `-forks` (same format as [`internal/forks/forks.yaml`](internal/forks/forks.yaml)).
 
@@ -247,7 +247,7 @@ STATUS  NODE     VERSION               ADVISORIES
 WARN    aztec-1  Aztec 6.0.0 -> 6.1.0  1 (medium)
 
 Findings:
-  WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 8 days ago (grace period 30 days)
+  WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 3 days ago (grace period 30 days)
   NOTE  aztec-1 advisories: Aztec 6.0.0 is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: "UltraHonk native verifier throws or aborts on a recursive pairing acc…"; packages @aztec/bb.js, @aztec-foundation/bb.js, barretenberg-rs); https://github.com/AztecProtocol/aztec-packages/security/advisories
   NOTE  aztec-1 advisories: cannot tell whether Aztec 6.0.0 is affected by GHSA-778c-2h5c-8r96 (low: "Checkpoint with over 72 blocks pushed via the escape hatch and proven…"; package @aztec/archiver @aztec/stdlib), check it yourself (affected versions "current Ignition mainnet release (v4 ta…", patched "> v5.0.0-rc.1")
 
@@ -256,15 +256,15 @@ Status: WARN (0 OK, 1 WARN, 0 CRIT)
 
 (Real output from 2026-11-27 against the public Aztec mainnet endpoint of drpc.)
 
-The [status rules](#status-rules) for version and advisories are the same as for Ethereum clients, with the releases and advisories of `AztecProtocol/aztec-packages`:
+The [status rules](#status-rules) for version and advisories are the same as for Ethereum clients:
 
-- **Releases:** only a plain version such as `6.1.0` is a stable release. `rc.N` is a pre-release; `nightly`, `dev` and `commit` builds are dev builds; any other suffix (for example `devnet` or `private`) is unrecognized. All of them are yellow on a node and never count as the latest release, even where GitHub does not mark them as pre-releases.
-- **Advisories:** aztec-packages releases many packages under one version, and an advisory counts if any of its packages is affected. The finding names the affected packages, so you can judge whether the node uses them; if not, add the advisory to [`ignore_advisories`](#ignoring-an-advisory).
+- **Releases** come from [`aztec-labs-eng/aztec-node`](https://github.com/aztec-labs-eng/aztec-node/releases), where the node is released since v6. The aztec-packages monorepo publishes releases with the same numbers for Barretenberg, bb.js and the L1 contracts, sometimes days earlier; they are not node releases. Only a plain version such as `6.1.0` is a stable release. `rc.N` is a pre-release; `nightly`, `dev` and `commit` builds are dev builds; any other suffix (for example `devnet` or `private`) is unrecognized. All of them are yellow on a node and never count as the latest release, even where GitHub does not mark them as pre-releases.
+- **Advisories** come from [`AztecProtocol/aztec-packages`](https://github.com/AztecProtocol/aztec-packages/security/advisories); aztec-node publishes none of its own. They concern packages such as Barretenberg and bb.js, which the node ships. aztec-packages releases many packages under one version, and an advisory counts if any of its packages is affected. The finding names the affected packages, so you can judge whether the node uses them; if not, add the advisory to [`ignore_advisories`](#ignoring-an-advisory). Whether a fix is released is checked against the node releases.
 
 Known limitations:
 
 - **Version and advisories only.** Network, sync status and upgrade readiness of Aztec nodes are not checked yet.
-- **One page of releases.** x3f reads the newest 100 releases of aztec-packages, most of them nightly builds; in November 2026 they reached back to April 2026 (4.2.0). For a node older than that, "first newer release" names the oldest stable release on that page instead of the real one. The status is still right: such a node is far beyond the grace period.
+- **Node releases before v6 are not in aztec-node.** For a node older than 6.0.0, "first newer release" is 6.0.0, not the real successor (such as 5.2.1). The status is still right: v6 is a new network, and such a node is far beyond the grace period.
 
 ### Telegram notifications
 

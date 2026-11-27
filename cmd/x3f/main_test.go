@@ -27,6 +27,7 @@ import (
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 	"github.com/ropslabs/x3f/internal/status"
 )
 
@@ -347,7 +348,8 @@ func aztecFixture(t *testing.T, name string) []byte {
 }
 
 // TestRunAztec checks an Aztec node end to end: its own table, the version
-// and advisory rules with the recorded aztec-packages data, the metrics,
+// and advisory rules with the recorded GitHub data (releases of aztec-node,
+// advisories of aztec-packages), the metrics,
 // and that neither its URL nor an l1_url appear in the output.
 func TestRunAztec(t *testing.T) {
 	const key = "apikey0123456789secret" // gitleaks:allow (test dummy)
@@ -373,8 +375,8 @@ nodes:
 `)
 	metricsFile := filepath.Join(t.TempDir(), "x3f.prom")
 	var out, errOut bytes.Buffer
-	// 2026-11-24: v6.1.0 (2026-11-19) is the latest release, 6.0.0 is
-	// within the grace period.
+	// 2026-11-24 12:00: v6.1.0 (2026-11-24 08:36) is the latest release,
+	// 6.0.0 is within the grace period.
 	code := run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir(), "-metrics-file", metricsFile},
 		&out, &errOut, testEnv(gh, now))
 	got := out.String()
@@ -400,7 +402,9 @@ nodes:
 		}
 	}
 	for _, want := range []string{
-		"WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 5 days ago (grace period 30 days)",
+		// The node release of aztec-node (2026-11-24 08:36 UTC), not the
+		// aztec-packages release of the same number five days earlier.
+		"WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published less than 1 day ago (grace period 30 days)",
 		// Real data: GHSA-73xc-j27q-wg75 (medium) has no fixed release
 		// for 6.x yet, so it is a note; GHSA-778c-2h5c-8r96 names its
 		// range in free text.
@@ -416,9 +420,15 @@ nodes:
 	}
 
 	gh.mu.Lock()
-	for _, p := range []string{"/repos/AztecProtocol/aztec-packages/releases", "/repos/AztecProtocol/aztec-packages/security-advisories"} {
-		if gh.requests[p] != 1 {
-			t.Errorf("%d requests for %s, want 1", gh.requests[p], p)
+	// Releases from aztec-node, advisories from aztec-packages.
+	for p, want := range map[string]int{
+		"/repos/aztec-labs-eng/aztec-node/releases":               1,
+		"/repos/AztecProtocol/aztec-packages/security-advisories": 1,
+		"/repos/aztec-labs-eng/aztec-node/security-advisories":    0,
+		"/repos/AztecProtocol/aztec-packages/releases":            0,
+	} {
+		if gh.requests[p] != want {
+			t.Errorf("%d requests for %s, want %d", gh.requests[p], p, want)
 		}
 	}
 	gh.mu.Unlock()
@@ -453,7 +463,8 @@ nodes:
 }
 
 // TestRunAztecIgnoreAdvisories checks the global and the node's own
-// ignore list on an Aztec node, with the recorded aztec-packages data.
+// ignore list on an Aztec node, with the recorded advisories of
+// aztec-packages.
 func TestRunAztecIgnoreAdvisories(t *testing.T) {
 	m := newMocks(t)
 	gh := newFakeGitHub(t)
@@ -1772,5 +1783,30 @@ x3f_check_status{node="dead",check="ignore_advisories"} 3
 `
 	if !strings.Contains(got, want) {
 		t.Errorf("metrics file:\n%s\nwant it to contain:\n%s", got, want)
+	}
+}
+
+// TestUpstreamInputsUseTheirRepositories checks that Aztec versions are
+// compared with the releases of aztec-node, while its advisories come from
+// aztec-packages and a fix counts as released by the node's releases.
+func TestUpstreamInputsUseTheirRepositories(t *testing.T) {
+	nodeRepo := software.Repo{Owner: "aztec-labs-eng", Name: "aztec-node"}
+	monorepo := software.Repo{Owner: "AztecProtocol", Name: "aztec-packages"}
+	nodeReleases, monorepoReleases := &releases.Result{}, &releases.Result{}
+	advisories := &releases.AdvisoryResult{}
+	up := upstream{
+		rel: map[software.Repo]releaseData{nodeRepo: {result: nodeReleases}, monorepo: {result: monorepoReleases}},
+		adv: map[software.Repo]advisoryData{monorepo: {result: advisories}},
+	}
+	v := software.Reported{Raw: "6.0.0", Name: software.Aztec, Version: "6.0.0"}
+	if in := up.versionInput(v, nil, assessParams{}); in.Releases != nodeReleases {
+		t.Error("versionInput does not use the releases of aztec-node")
+	}
+	in := up.advisoryInput(v, nil, nil, assessParams{})
+	if in.Advisories != advisories {
+		t.Error("advisoryInput does not use the advisories of aztec-packages")
+	}
+	if in.Releases != nodeReleases {
+		t.Error("advisoryInput does not check fixes against the releases of aztec-node")
 	}
 }

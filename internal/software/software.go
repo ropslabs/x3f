@@ -30,8 +30,9 @@ const (
 	Lodestar   Name = "lodestar"
 	Grandine   Name = "grandine"
 
-	// Aztec node software (full node, sequencer, prover), released from
-	// the aztec-packages monorepo.
+	// Aztec node software (full node, sequencer, prover). Since v6 it is
+	// released from aztec-labs-eng/aztec-node; Barretenberg, bb.js and the
+	// L1 contracts stay in the aztec-packages monorepo.
 	Aztec Name = "aztec"
 )
 
@@ -92,10 +93,11 @@ type Repo struct {
 
 func (r Repo) String() string { return r.Owner + "/" + r.Name }
 
-// repos maps each piece of software to its GitHub repository. Paths were
-// checked against the GitHub API on 2026-11-24 (aztec-packages on
-// 2026-11-27). Several have moved; GitHub still
-// redirects the old paths, but we use the current ones:
+// repos maps each piece of software to the GitHub repository of its
+// releases, which is also the repository of its advisories unless
+// advisoryRepos says otherwise. Paths were checked against the GitHub API
+// on 2026-11-24 (the Aztec ones on 2026-11-27). Several have moved; GitHub
+// still redirects the old paths, but we use the current ones:
 //
 //	hyperledger/besu     -> besu-eth/besu
 //	prysmaticlabs/prysm  -> OffchainLabs/prysm
@@ -114,7 +116,16 @@ var repos = map[Name]Repo{
 	Nimbus:     {"status-im", "nimbus-eth2"},
 	Lodestar:   {"ChainSafe", "lodestar"},
 	Grandine:   {"grandinetech", "grandine"},
-	Aztec:      {"AztecProtocol", "aztec-packages"},
+	// Since v6 (operator changelog v6.md: "Source repository").
+	Aztec: {"aztec-labs-eng", "aztec-node"},
+}
+
+// advisoryRepos lists software whose security advisories are published in
+// another repository than its releases. The Aztec node publishes none of
+// its own; aztec-packages publishes those of Barretenberg and bb.js, which
+// the node ships.
+var advisoryRepos = map[Name]Repo{
+	Aztec: {"AztecProtocol", "aztec-packages"},
 }
 
 // listsPackages marks software whose repository publishes several packages
@@ -128,8 +139,18 @@ var listsPackages = map[Name]bool{
 // packages.
 func ListsPackages(n Name) bool { return listsPackages[n] }
 
-// RepoFor returns the GitHub repository of a piece of software.
-func RepoFor(c Name) (Repo, bool) {
+// ReleaseRepo returns the GitHub repository whose releases a piece of
+// software is compared with.
+func ReleaseRepo(c Name) (Repo, bool) {
 	r, ok := repos[c]
 	return r, ok
+}
+
+// AdvisoryRepo returns the GitHub repository whose security advisories
+// apply to a piece of software.
+func AdvisoryRepo(c Name) (Repo, bool) {
+	if r, ok := advisoryRepos[c]; ok {
+		return r, true
+	}
+	return ReleaseRepo(c)
 }
