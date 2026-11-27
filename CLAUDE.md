@@ -108,7 +108,7 @@ While working on steps 5–7: where it costs no extra effort, do not hard-wire l
 
 Recorded for later; not part of v1, do not implement yet.
 
-1. **Damping against flapping**, directly after version 1: report a status change only after it persisted for two runs, at least for "unreachable", so a single timeout does not cause two messages.
+1. **Damping against flapping**, directly after version 1: report a status change only after it persisted for two runs, for every status change, not only "unreachable". A single timeout must not cause two messages, and neither must a load balancer: in the v0.2.0-rc.1 test, public endpoints (publicnode.com) answered from different backends from run to run (Reth 2.11.0, then Geth 1.17.9), so the node switched between WARN and CRIT and every run sent a message.
 2. **General component model.** A component has a type, a version source, an upstream repository and a health check. Execution and consensus clients become the first types: compiled-in implementations of one shared interface, not Go's `plugin` package.
 3. **Local web UI** on top of that model: `x3f serve`, embedded in the binary, listening on localhost by default, read-only.
 4. **New component types:** validator client, MEV-Boost, later L2 nodes and indexers.
