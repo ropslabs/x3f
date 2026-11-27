@@ -19,7 +19,7 @@ x3f checks Ethereum nodes: network, client versions, sync status, whether the cl
 Download the archive for your system from the [releases page](https://github.com/ropslabs/x3f/releases) and check it against `SHA256SUMS`:
 
 ```sh
-VERSION=0.1.0
+VERSION=0.2.0
 curl -LO https://github.com/ropslabs/x3f/releases/download/v$VERSION/x3f_${VERSION}_linux_amd64.tar.gz
 curl -LO https://github.com/ropslabs/x3f/releases/download/v$VERSION/SHA256SUMS
 sha256sum -c --ignore-missing SHA256SUMS
