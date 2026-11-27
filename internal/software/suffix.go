@@ -65,7 +65,32 @@ func ClassifySuffix(client Name, suffix string) Kind {
 		}
 		return KindDevBuild
 	}
+
+	if client == Aztec {
+		return classifyAztec(suffix)
+	}
 	return kind
+}
+
+// classifyAztec applies Aztec's release channels. Only a version without
+// suffix is a release: aztec-packages publishes stable releases as plain
+// x.y.z, and GitHub's pre-release flag is not reliable (v0.0.1-private is
+// not flagged). Release candidates are "rc.N"; nightlies ("nightly.<date>",
+// sometimes with "-N"), "dev" and "commit.<hash>" are dev builds. Anything
+// else, e.g. "private", "devnet.4-patch.0" or "spartan.<date>", is unknown.
+func classifyAztec(suffix string) Kind {
+	if suffix == "" {
+		return KindRelease
+	}
+	first, _, _ := strings.Cut(strings.ToLower(suffix), ".")
+	first, _, _ = strings.Cut(first, "-")
+	switch first {
+	case "rc":
+		return KindPreRelease
+	case "nightly", "dev", "commit":
+		return KindDevBuild
+	}
+	return KindUnknown
 }
 
 // classifyParts is the client-independent part of ClassifySuffix.

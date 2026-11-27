@@ -26,6 +26,13 @@ headers and no tokens**; the requests were made without a token anyway.
 releases; `v32.0.0-rc.2` and `v32.0.0-rc.1` are flagged pre-releases, the
 latest stable release is `v31.0.0`).
 
+`AztecProtocol_aztec-packages.json` was recorded the same way on 2026-11-27
+(the newest 100 releases, back to 2026-04-06; 12 stable releases up to
+`v6.1.0`). Its tags show the Aztec channels: plain `x.y.z` (stable),
+`-rc.N`, `-nightly.<date>` and `-nightly.<date>-N`, `-dev`,
+`-commit.<hash>`, `-devnet.N-patch.N` and `v0.0.1-private`, which is **not**
+flagged as a pre-release.
+
 Order and number of releases are unchanged (100 per repository; Grandine has
 only 28 releases in total).
 

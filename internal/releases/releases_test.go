@@ -32,6 +32,7 @@ func TestEveryClientHasRepoAndFixture(t *testing.T) {
 	clients := []software.Name{
 		software.Geth, software.Reth, software.Nethermind, software.Erigon, software.Besu, software.Ethrex,
 		software.Lighthouse, software.Prysm, software.Teku, software.Nimbus, software.Lodestar, software.Grandine,
+		software.Aztec,
 	}
 	for _, c := range clients {
 		repo, ok := software.RepoFor(c)
@@ -69,6 +70,7 @@ func TestLatestStableFromRecordedReleases(t *testing.T) {
 		{software.Nimbus, "26.10.2"}, // "nightly" tag is ignored
 		{software.Lodestar, "1.51.0"},
 		{software.Grandine, "2.0.6"}, // 3.0.0-rc.4 is a pre-release
+		{software.Aztec, "6.1.0"},    // v0.0.1-private is not flagged, but not a release either
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.client), func(t *testing.T) {
@@ -150,6 +152,8 @@ func TestFirstMissing(t *testing.T) {
 	geth := loadFixture(t, repo)
 	repo, _ = software.RepoFor(software.Lighthouse)
 	lighthouse := loadFixture(t, repo)
+	repo, _ = software.RepoFor(software.Aztec)
+	aztec := loadFixture(t, repo)
 
 	tests := []struct {
 		name     string
@@ -167,6 +171,10 @@ func TestFirstMissing(t *testing.T) {
 		// v8.4.0-rc.0 pre-release (flagged) must not count as missing.
 		{"lighthouse rc of latest", software.Lighthouse, lighthouse, "8.3.3-rc.1", "v8.3.3", "2026-11-09T07:12:58Z"},
 		{"lighthouse up to date", software.Lighthouse, lighthouse, "8.3.3", "", ""},
+		{"aztec one release behind", software.Aztec, aztec, "6.0.0", "v6.1.0", "2026-11-19T10:59:01Z"},
+		{"aztec up to date", software.Aztec, aztec, "6.1.0", "", ""},
+		// A nightly of the next version is ahead of every release.
+		{"aztec nightly ahead", software.Aztec, aztec, "6.2.0-nightly.20261126", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

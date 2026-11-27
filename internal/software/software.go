@@ -29,6 +29,10 @@ const (
 	Nimbus     Name = "nimbus"
 	Lodestar   Name = "lodestar"
 	Grandine   Name = "grandine"
+
+	// Aztec node software (full node, sequencer, prover), released from
+	// the aztec-packages monorepo.
+	Aztec Name = "aztec"
 )
 
 var displayNames = map[Name]string{
@@ -45,6 +49,7 @@ var displayNames = map[Name]string{
 	Nimbus:     "Nimbus",
 	Lodestar:   "Lodestar",
 	Grandine:   "Grandine",
+	Aztec:      "Aztec",
 }
 
 // String returns the display name. Implementing String() makes fmt use it
@@ -87,8 +92,9 @@ type Repo struct {
 
 func (r Repo) String() string { return r.Owner + "/" + r.Name }
 
-// repos maps each piece of software to its GitHub repository. Paths were checked
-// against the GitHub API on 2026-11-24. Several have moved; GitHub still
+// repos maps each piece of software to its GitHub repository. Paths were
+// checked against the GitHub API on 2026-11-24 (aztec-packages on
+// 2026-11-27). Several have moved; GitHub still
 // redirects the old paths, but we use the current ones:
 //
 //	hyperledger/besu     -> besu-eth/besu
@@ -108,6 +114,7 @@ var repos = map[Name]Repo{
 	Nimbus:     {"status-im", "nimbus-eth2"},
 	Lodestar:   {"ChainSafe", "lodestar"},
 	Grandine:   {"grandinetech", "grandine"},
+	Aztec:      {"AztecProtocol", "aztec-packages"},
 }
 
 // RepoFor returns the GitHub repository of a piece of software.

@@ -491,17 +491,13 @@ func TestAssessAdvisoriesCounts(t *testing.T) {
 // fix for that line (recorded data, see internal/releases/testdata). A
 // medium advisory without a fix is a note: the operator cannot update, so
 // the node must not stay yellow. It still counts in the cell.
-//
-// Aztec is not a software entry of its own yet; Geth stands in as the
-// client, which only selects the generic suffix rules that apply to these
-// ranges ("nightly" is a dev build, "-0" a release).
 func TestAssessAdvisoriesMediumWithoutFixIsNote(t *testing.T) {
 	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
 	advs := recorded[releases.Advisory](t, "advisories", "AztecProtocol_aztec-packages.json")
 	for _, running := range []string{"6.0.0", "6.1.0"} {
 		t.Run(running, func(t *testing.T) {
 			r := AssessAdvisories(AdvisoryInput{
-				Version:    software.Reported{Raw: running, Name: software.Geth, Version: running},
+				Version:    software.Reported{Raw: running, Name: software.Aztec, Version: running},
 				Advisories: &releases.AdvisoryResult{Advisories: advs, FetchedAt: now},
 				Now:        now,
 			})
@@ -509,9 +505,9 @@ func TestAssessAdvisoriesMediumWithoutFixIsNote(t *testing.T) {
 				t.Errorf("level %v, cell %q, counts %v; want OK, \"1 (medium)\", 1 medium", r.Level, r.Cell, r.Counts)
 			}
 			want := []string{
-				"Geth " + running + " is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: ",
+				"Aztec " + running + " is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: ",
 				// The free-text range of GHSA-778c-2h5c-8r96.
-				"cannot tell whether Geth " + running + " is affected by GHSA-778c-2h5c-8r96",
+				"cannot tell whether Aztec " + running + " is affected by GHSA-778c-2h5c-8r96",
 			}
 			if len(r.Findings) != len(want) {
 				t.Fatalf("findings %v, want %d", r.Findings, len(want))

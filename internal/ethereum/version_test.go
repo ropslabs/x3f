@@ -173,6 +173,13 @@ func TestParseClientVersion(t *testing.T) {
 			raw:  "cloudflare-ethereum",
 			want: software.Reported{Name: software.Unknown},
 		},
+		{
+			// Aztec is known software, but not an Ethereum client: an
+			// Ethereum endpoint answering like this is not recognized.
+			name: "synthetic: known software that is no Ethereum client",
+			raw:  "Aztec/v6.0.0",
+			want: software.Reported{Name: software.Unknown, Version: "6.0.0"},
+		},
 
 		// Case-insensitive client detection (synthetic).
 		{

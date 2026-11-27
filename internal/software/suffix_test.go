@@ -22,6 +22,21 @@ func TestClassifySuffix(t *testing.T) {
 		{Ethrex, "main", KindDevBuild}, // any other channel is a branch
 		{Ethrex, "fix-snap-sync", KindDevBuild},
 
+		// Aztec: suffixes of real aztec-packages tags (recorded releases
+		// in internal/releases/testdata) and advisory ranges. Only the
+		// plain version is a release.
+		{Aztec, "", KindRelease},
+		{Aztec, "rc.2", KindPreRelease},             // v5.0.0-rc.2
+		{Aztec, "nightly.20260618", KindDevBuild},   // v4.4.0-nightly.20260618
+		{Aztec, "nightly.20260512-2", KindDevBuild}, // v4.3.0-nightly.20260512-2
+		{Aztec, "dev", KindDevBuild},                // v0.0.1-dev
+		{Aztec, "commit.fff30aa", KindDevBuild},     // v0.0.1-commit.fff30aa
+		{Aztec, "private", KindUnknown},             // v0.0.1-private, not flagged as pre-release
+		{Aztec, "devnet.4-patch.0", KindUnknown},    // v4.0.0-devnet.4-patch.0
+		{Aztec, "spartan.20260207", KindUnknown},    // advisory range ">= 4.0.0-spartan.20260207"
+		{Aztec, "stable", KindUnknown},              // a release word for other software, not for Aztec
+		{Aztec, "0", KindUnknown},                   // advisory range "< 7.0.0-0": below 7.0.0
+
 		// Pre-release, in all spellings seen in the recorded tags.
 		{Lighthouse, "rc.1", KindPreRelease},
 		{Erigon, "rc1", KindPreRelease},
