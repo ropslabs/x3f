@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // Range is a parsed vulnerable_version_range of an advisory. GitHub does
@@ -89,7 +89,7 @@ func (r Range) hasUpperBound() bool {
 }
 
 // holds reports whether v satisfies one constraint.
-func (c constraint) holds(client ethereum.ClientName, v Version) bool {
+func (c constraint) holds(client software.Name, v Version) bool {
 	n := Compare(client, v, c.v)
 	switch c.op {
 	case "<":
@@ -143,7 +143,7 @@ const (
 // is bounded by the lowest patched version: below it, a version is
 // affected. If no patched version is named, ">= 24.5.2" means what it
 // says, while "all" stays Unclear.
-func (a Advisory) Check(client ethereum.ClientName, running Version) (m Match, fix Version, hasFix bool) {
+func (a Advisory) Check(client software.Name, running Version) (m Match, fix Version, hasFix bool) {
 	affected, unclear, withoutFix := false, false, false
 	for _, e := range a.Vulnerabilities {
 		entryM, entryFix, entryHasFix := checkEntry(client, e, running)
@@ -175,7 +175,7 @@ func (a Advisory) Check(client ethereum.ClientName, running Version) (m Match, f
 }
 
 // checkEntry checks one vulnerability entry; see Check.
-func checkEntry(client ethereum.ClientName, e AdvisoryVulnerability, running Version) (Match, Version, bool) {
+func checkEntry(client software.Name, e AdvisoryVulnerability, running Version) (Match, Version, bool) {
 	r, ok := ParseRange(e.VulnerableVersionRange)
 	if !ok {
 		return Unclear, Version{}, false

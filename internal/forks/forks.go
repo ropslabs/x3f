@@ -13,9 +13,9 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/network"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // embedded is forks.yaml, compiled into the binary. The //go:embed
@@ -53,11 +53,11 @@ type Fork struct {
 	Time      time.Time // execution layer activation
 	Postponed bool
 	// MinVersions: releases the announcement lists for this fork.
-	MinVersions map[ethereum.ClientName]releases.Version
+	MinVersions map[software.Name]releases.Version
 	// For postponed forks: releases containing the former schedule and the
 	// first releases that removed it.
-	ScheduledIn map[ethereum.ClientName]releases.Version
-	RemovedIn   map[ethereum.ClientName]releases.Version
+	ScheduledIn map[software.Name]releases.Version
+	RemovedIn   map[software.Name]releases.Version
 	Sources     []string
 }
 
@@ -201,11 +201,11 @@ func Parse(data []byte) (*Schedule, error) {
 }
 
 // versions parses a client -> version map.
-func versions(m map[string]string, label string, fail func(string, ...any)) map[ethereum.ClientName]releases.Version {
-	out := make(map[ethereum.ClientName]releases.Version, len(m))
+func versions(m map[string]string, label string, fail func(string, ...any)) map[software.Name]releases.Version {
+	out := make(map[software.Name]releases.Version, len(m))
 	for client, raw := range m {
-		c := ethereum.ClientName(client)
-		if _, ok := releases.RepoFor(c); !ok {
+		c := software.Name(client)
+		if _, ok := software.RepoFor(c); !ok {
 			fail("%s: unknown client %q", label, client)
 			continue
 		}

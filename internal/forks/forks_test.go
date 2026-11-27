@@ -12,7 +12,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 var now = time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
@@ -59,11 +59,11 @@ func TestEmbeddedScheduleIsValid(t *testing.T) {
 
 	// Spot checks against the announcements.
 	mainnet := s.Networks["mainnet"]
-	if got := mainnet.Forks[0].MinVersions[ethereum.Geth].String(); got != "1.16.7" {
+	if got := mainnet.Forks[0].MinVersions[software.Geth].String(); got != "1.16.7" {
 		t.Errorf("mainnet Fusaka geth minimum = %s", got)
 	}
 	hoodiGlam := s.Networks["hoodi"].Postponed()[0]
-	if got := hoodiGlam.RemovedIn[ethereum.Geth].String(); got != "1.17.10" {
+	if got := hoodiGlam.RemovedIn[software.Geth].String(); got != "1.17.10" {
 		t.Errorf("hoodi Glamsterdam geth removed_in = %s", got)
 	}
 	if got := hoodiGlam.Time.Format(time.RFC3339); got != "2026-10-26T17:42:48Z" {

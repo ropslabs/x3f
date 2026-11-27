@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 const testToken = "ghp_testtoken0123456789"
@@ -28,7 +30,7 @@ type fakeGitHub struct {
 
 func newFakeGitHub(t *testing.T) *fakeGitHub {
 	t.Helper()
-	body, err := os.ReadFile(fixturePath(Repo{"ethereum", "go-ethereum"}))
+	body, err := os.ReadFile(fixturePath(software.Repo{Owner: "ethereum", Name: "go-ethereum"}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +66,7 @@ type clock struct{ t time.Time }
 
 func (c *clock) Now() time.Time { return c.t }
 
-var geth = Repo{"ethereum", "go-ethereum"}
+var geth = software.Repo{Owner: "ethereum", Name: "go-ethereum"}
 
 func newSource(t *testing.T, f *fakeGitHub, c *clock) *Source {
 	return &Source{BaseURL: f.srv.URL, Token: testToken, CacheDir: t.TempDir(), TTL: time.Hour, Now: c.Now}
@@ -240,7 +242,7 @@ func TestReleasesFollowsRedirect(t *testing.T) {
 
 	s := newSource(t, f, &clock{t: time.Now()})
 	s.BaseURL = redirect.URL
-	res, err := s.Releases(context.Background(), Repo{"old-owner", "go-ethereum"})
+	res, err := s.Releases(context.Background(), software.Repo{Owner: "old-owner", Name: "go-ethereum"})
 	if err != nil || len(res.Releases) != 100 {
 		t.Fatalf("got %d releases, err %v", len(res.Releases), err)
 	}

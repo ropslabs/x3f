@@ -3,6 +3,8 @@ package releases
 import (
 	"context"
 	"time"
+
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // Advisory is one published GitHub security advisory of a client
@@ -45,7 +47,7 @@ type AdvisoryResult struct {
 // Advisories returns the published security advisories of repo, with the
 // same caching and error rules as Releases. Withdrawn advisories are left
 // out.
-func (s *Source) Advisories(ctx context.Context, repo Repo) (AdvisoryResult, error) {
+func (s *Source) Advisories(ctx context.Context, repo software.Repo) (AdvisoryResult, error) {
 	r, err := getList[Advisory](ctx, s, repo, advisoriesList, false)
 	return AdvisoryResult{
 		Advisories: withoutWithdrawn(r.Items),

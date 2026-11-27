@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/metrics"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 	"github.com/ropslabs/x3f/internal/status"
 )
 
@@ -26,7 +26,7 @@ const checkUnknown = 3
 var severityLabels = []string{"critical", "high", "medium", "low", "none"}
 
 // buildMetrics returns all metric families of a run.
-func buildMetrics(nodes []checker, rows []row, rel map[releases.Repo]releaseData, success bool, now time.Time) []metrics.Family {
+func buildMetrics(nodes []checker, rows []row, rel map[software.Repo]releaseData, success bool, now time.Time) []metrics.Family {
 	nodeStatus := metrics.Family{Name: "x3f_node_status", Help: "Status of a node: 0 OK, 1 WARN, 2 CRIT."}
 	checkStatus := metrics.Family{Name: "x3f_check_status", Help: "Status of one check of a node: 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run)."}
 	advisories := metrics.Family{Name: "x3f_advisories", Help: "Published security advisories that affect a client and are not ignored, by severity."}
@@ -55,23 +55,23 @@ func buildMetrics(nodes []checker, rows []row, rel map[releases.Repo]releaseData
 
 	clientInfo := metrics.Family{Name: "x3f_client_info", Help: "Client and version a node runs; build is release, prerelease, dev or unknown."}
 	latestInfo := metrics.Family{Name: "x3f_client_latest_info", Help: "Highest stable release of a client known from GitHub."}
-	var latestDone []ethereum.ClientName
+	var latestDone []software.Name
 	for _, n := range nodes {
 		for _, s := range n.software() {
 			v := s.version
 			running, ok := releases.ParseVersion(v.Version)
-			if v.Client == ethereum.Unknown || !v.HasVersion() || !ok {
+			if v.Name == software.Unknown || !v.HasVersion() || !ok {
 				continue
 			}
-			client := strings.ToLower(v.Client.String())
+			client := strings.ToLower(v.Name.String())
 			clientInfo.Samples = append(clientInfo.Samples, metrics.Sample{Labels: []metrics.Label{
 				{Name: "node", Value: n.name()}, {Name: "component", Value: s.component}, {Name: "client", Value: client},
-				{Name: "version", Value: plainVersion(running)}, {Name: "build", Value: buildLabel(releases.ClassifySuffix(v.Client, v.Suffix))},
+				{Name: "version", Value: plainVersion(running)}, {Name: "build", Value: buildLabel(software.ClassifySuffix(v.Name, v.Suffix))},
 			}, Value: 1})
 
-			if repo, ok := releases.RepoFor(v.Client); ok && rel[repo].result != nil && !slices.Contains(latestDone, v.Client) {
-				latestDone = append(latestDone, v.Client)
-				if latest, ok := releases.LatestStable(v.Client, rel[repo].result.Releases); ok {
+			if repo, ok := software.RepoFor(v.Name); ok && rel[repo].result != nil && !slices.Contains(latestDone, v.Name) {
+				latestDone = append(latestDone, v.Name)
+				if latest, ok := releases.LatestStable(v.Name, rel[repo].result.Releases); ok {
 					latestInfo.Samples = append(latestInfo.Samples, metrics.Sample{Labels: []metrics.Label{
 						{Name: "client", Value: client}, {Name: "version", Value: plainVersion(latest)},
 					}, Value: 1})
@@ -111,7 +111,7 @@ func buildMetrics(nodes []checker, rows []row, rel map[releases.Repo]releaseData
 // githubComplete reports whether release and advisory data is available
 // for every detected client: fresh, or cached and younger than the 7 days
 // the status rules accept.
-func githubComplete(rel map[releases.Repo]releaseData, adv map[releases.Repo]advisoryData, now time.Time) bool {
+func githubComplete(rel map[software.Repo]releaseData, adv map[software.Repo]advisoryData, now time.Time) bool {
 	usable := func(refreshErr error, fetchedAt time.Time) bool {
 		return refreshErr == nil || now.Sub(fetchedAt) <= status.MaxReleaseDataAge
 	}
@@ -134,13 +134,13 @@ func plainVersion(v releases.Version) string {
 	return fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch)
 }
 
-func buildLabel(k releases.SuffixKind) string {
+func buildLabel(k software.Kind) string {
 	switch k {
-	case releases.KindRelease:
+	case software.KindRelease:
 		return "release"
-	case releases.KindPreRelease:
+	case software.KindPreRelease:
 		return "prerelease"
-	case releases.KindDevBuild:
+	case software.KindDevBuild:
 		return "dev"
 	default:
 		return "unknown"

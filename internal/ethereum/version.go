@@ -2,89 +2,20 @@ package ethereum
 
 import (
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/ropslabs/x3f/internal/software"
 )
 
-// ClientName identifies an Ethereum client implementation.
-//
-// It is a named string type: the compiler keeps it apart from plain strings,
-// so a ClientName cannot be mixed up with, say, a node name by accident.
-type ClientName string
-
-// Known clients. The values are lowercase and stable; use String for display.
-const (
-	Unknown ClientName = "unknown"
-
+// Clients are the Ethereum clients ParseClientVersion recognizes; other
+// software, even with a known name, is Unknown here.
+var Clients = []software.Name{
 	// Execution clients.
-	Geth       ClientName = "geth"
-	Reth       ClientName = "reth"
-	Nethermind ClientName = "nethermind"
-	Erigon     ClientName = "erigon"
-	Besu       ClientName = "besu"
-	Ethrex     ClientName = "ethrex"
-
+	software.Geth, software.Reth, software.Nethermind, software.Erigon, software.Besu, software.Ethrex,
 	// Consensus clients.
-	Lighthouse ClientName = "lighthouse"
-	Prysm      ClientName = "prysm"
-	Teku       ClientName = "teku"
-	Nimbus     ClientName = "nimbus"
-	Lodestar   ClientName = "lodestar"
-	Grandine   ClientName = "grandine"
-)
-
-var displayNames = map[ClientName]string{
-	Unknown:    "unknown",
-	Geth:       "Geth",
-	Reth:       "Reth",
-	Nethermind: "Nethermind",
-	Erigon:     "Erigon",
-	Besu:       "Besu",
-	Ethrex:     "Ethrex",
-	Lighthouse: "Lighthouse",
-	Prysm:      "Prysm",
-	Teku:       "Teku",
-	Nimbus:     "Nimbus",
-	Lodestar:   "Lodestar",
-	Grandine:   "Grandine",
+	software.Lighthouse, software.Prysm, software.Teku, software.Nimbus, software.Lodestar, software.Grandine,
 }
-
-// String returns the display name. Implementing String() makes fmt use it
-// automatically for %s and %v (it satisfies the fmt.Stringer interface).
-func (c ClientName) String() string {
-	if s, ok := displayNames[c]; ok {
-		return s
-	}
-	return string(c)
-}
-
-// ClientVersion is a parsed client version string, as returned by
-// web3_clientVersion or /eth/v1/node/version.
-//
-// Examples (see testdata/SOURCES.md for where they come from):
-//
-//	Geth/v1.17.10-stable-1df30b18/linux-amd64/go1.27.3
-//	  -> Client=geth Version=1.17.10 Suffix=stable Commit=1df30b18
-//	Nimbus/v26.10.2-0abc0d-stateofus
-//	  -> Client=nimbus Version=26.10.2 Suffix=stateofus Commit=0abc0d
-type ClientVersion struct {
-	// Raw is the unmodified string reported by the client.
-	Raw string
-	// Client is the detected implementation, or Unknown.
-	Client ClientName
-	// Version is the numeric MAJOR.MINOR.PATCH part without a "v" prefix,
-	// e.g. "1.17.10". Empty if no version could be found.
-	Version string
-	// Suffix holds everything after the numeric version that is not the
-	// commit, joined with "-", e.g. "stable", "unstable-20261120", "rc.1",
-	// "dev", "stateofus". It is kept verbatim: whether a suffix means
-	// "pre-release" depends on the client and is decided when comparing.
-	Suffix string
-	// Commit is the abbreviated git commit hash, if the string contains one.
-	Commit string
-}
-
-// HasVersion reports whether a numeric version was found.
-func (v ClientVersion) HasVersion() bool { return v.Version != "" }
 
 var (
 	// versionRe matches a version segment such as "v1.17.10-stable-1df30b18",
@@ -96,12 +27,12 @@ var (
 )
 
 // ParseClientVersion parses a client version string. It never fails: if the
-// client is not recognised, Client is Unknown; if no version is found,
+// client is not recognised, Name is software.Unknown; if no version is found,
 // Version is empty. Raw is always set, so callers can still show it.
 //
 // Client detection ignores case ("GETH", "geth" and "Geth" all match).
-func ParseClientVersion(raw string) ClientVersion {
-	v := ClientVersion{Raw: raw, Client: Unknown}
+func ParseClientVersion(raw string) software.Reported {
+	v := software.Reported{Raw: raw, Name: software.Unknown}
 
 	// Split on "/" and whitespace. Prysm uses "Prysm/v7.3.2-844d8b8 (linux amd64)",
 	// everyone else separates parts with "/". strings.FieldsFunc drops empty
@@ -113,9 +44,9 @@ func ParseClientVersion(raw string) ClientVersion {
 		return v
 	}
 
-	name := ClientName(strings.ToLower(fields[0]))
-	if _, known := displayNames[name]; known && name != Unknown {
-		v.Client = name
+	name := software.Name(strings.ToLower(fields[0]))
+	if slices.Contains(Clients, name) {
+		v.Name = name
 	}
 
 	// The version is the first field after the name that looks like one.

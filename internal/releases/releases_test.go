@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // loadFixture reads a recorded GitHub releases response (SOURCES.md).
-func loadFixture(t *testing.T, repo Repo) []Release {
+func loadFixture(t *testing.T, repo software.Repo) []Release {
 	t.Helper()
 	data, err := os.ReadFile(fixturePath(repo))
 	if err != nil {
@@ -24,17 +24,17 @@ func loadFixture(t *testing.T, repo Repo) []Release {
 	return rels
 }
 
-func fixturePath(repo Repo) string {
+func fixturePath(repo software.Repo) string {
 	return filepath.Join("testdata", "github", repo.Owner+"_"+repo.Name+".json")
 }
 
 func TestEveryClientHasRepoAndFixture(t *testing.T) {
-	clients := []ethereum.ClientName{
-		ethereum.Geth, ethereum.Reth, ethereum.Nethermind, ethereum.Erigon, ethereum.Besu, ethereum.Ethrex,
-		ethereum.Lighthouse, ethereum.Prysm, ethereum.Teku, ethereum.Nimbus, ethereum.Lodestar, ethereum.Grandine,
+	clients := []software.Name{
+		software.Geth, software.Reth, software.Nethermind, software.Erigon, software.Besu, software.Ethrex,
+		software.Lighthouse, software.Prysm, software.Teku, software.Nimbus, software.Lodestar, software.Grandine,
 	}
 	for _, c := range clients {
-		repo, ok := RepoFor(c)
+		repo, ok := software.RepoFor(c)
 		if !ok {
 			t.Errorf("no repository for %s", c)
 			continue
@@ -43,7 +43,7 @@ func TestEveryClientHasRepoAndFixture(t *testing.T) {
 			t.Errorf("no fixture for %s (%s)", c, repo)
 		}
 	}
-	if _, ok := RepoFor(ethereum.Unknown); ok {
+	if _, ok := software.RepoFor(software.Unknown); ok {
 		t.Error("unknown client must not have a repository")
 	}
 }
@@ -54,25 +54,25 @@ func TestLatestStableFromRecordedReleases(t *testing.T) {
 	// pre-release flag, flagged clean tags, non-version tags), so a wrong
 	// filter would pick something else in several of these.
 	tests := []struct {
-		client ethereum.ClientName
+		client software.Name
 		want   string
 	}{
-		{ethereum.Geth, "1.17.10"},
-		{ethereum.Reth, "2.11.0"},
-		{ethereum.Nethermind, "2.2.2"}, // 2.3.0-rc is newer but a pre-release
-		{ethereum.Erigon, "3.8.2"},
-		{ethereum.Besu, "26.11.2"},
-		{ethereum.Ethrex, "31.0.0"},    // v32.0.0-rc.2 is newer but a pre-release
-		{ethereum.Lighthouse, "8.3.3"}, // v8.4.0-rc.0 is newer but a pre-release
-		{ethereum.Prysm, "7.3.2"},
-		{ethereum.Teku, "26.10.3"},
-		{ethereum.Nimbus, "26.10.2"}, // "nightly" tag is ignored
-		{ethereum.Lodestar, "1.51.0"},
-		{ethereum.Grandine, "2.0.6"}, // 3.0.0-rc.4 is a pre-release
+		{software.Geth, "1.17.10"},
+		{software.Reth, "2.11.0"},
+		{software.Nethermind, "2.2.2"}, // 2.3.0-rc is newer but a pre-release
+		{software.Erigon, "3.8.2"},
+		{software.Besu, "26.11.2"},
+		{software.Ethrex, "31.0.0"},    // v32.0.0-rc.2 is newer but a pre-release
+		{software.Lighthouse, "8.3.3"}, // v8.4.0-rc.0 is newer but a pre-release
+		{software.Prysm, "7.3.2"},
+		{software.Teku, "26.10.3"},
+		{software.Nimbus, "26.10.2"}, // "nightly" tag is ignored
+		{software.Lodestar, "1.51.0"},
+		{software.Grandine, "2.0.6"}, // 3.0.0-rc.4 is a pre-release
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.client), func(t *testing.T) {
-			repo, _ := RepoFor(tt.client)
+			repo, _ := software.RepoFor(tt.client)
 			got, ok := LatestStable(tt.client, loadFixture(t, repo))
 			if !ok || got.String() != tt.want {
 				t.Errorf("LatestStable = %s, %v; want %s", got, ok, tt.want)
@@ -131,7 +131,7 @@ func TestStableFilter(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := LatestStable(ethereum.Besu, tt.rels)
+			got, ok := LatestStable(software.Besu, tt.rels)
 			if tt.want == "" {
 				if ok {
 					t.Errorf("got %s, want none", got)
@@ -146,27 +146,27 @@ func TestStableFilter(t *testing.T) {
 }
 
 func TestFirstMissing(t *testing.T) {
-	repo, _ := RepoFor(ethereum.Geth)
+	repo, _ := software.RepoFor(software.Geth)
 	geth := loadFixture(t, repo)
-	repo, _ = RepoFor(ethereum.Lighthouse)
+	repo, _ = software.RepoFor(software.Lighthouse)
 	lighthouse := loadFixture(t, repo)
 
 	tests := []struct {
 		name     string
-		client   ethereum.ClientName
+		client   software.Name
 		rels     []Release
 		running  string
 		wantTag  string // "" means up to date
 		wantTime string
 	}{
-		{"geth two releases behind", ethereum.Geth, geth, "1.17.8-stable", "v1.17.9", "2026-10-21T15:08:46Z"},
-		{"geth one release behind", ethereum.Geth, geth, "1.17.9-stable", "v1.17.10", "2026-10-23T12:07:39Z"},
-		{"geth up to date", ethereum.Geth, geth, "1.17.10-stable", "", ""},
-		{"geth dev build ahead", ethereum.Geth, geth, "1.17.11-unstable", "", ""},
+		{"geth two releases behind", software.Geth, geth, "1.17.8-stable", "v1.17.9", "2026-10-21T15:08:46Z"},
+		{"geth one release behind", software.Geth, geth, "1.17.9-stable", "v1.17.10", "2026-10-23T12:07:39Z"},
+		{"geth up to date", software.Geth, geth, "1.17.10-stable", "", ""},
+		{"geth dev build ahead", software.Geth, geth, "1.17.11-unstable", "", ""},
 		// The rc of the latest release is behind the final release; the
 		// v8.4.0-rc.0 pre-release (flagged) must not count as missing.
-		{"lighthouse rc of latest", ethereum.Lighthouse, lighthouse, "8.3.3-rc.1", "v8.3.3", "2026-11-09T07:12:58Z"},
-		{"lighthouse up to date", ethereum.Lighthouse, lighthouse, "8.3.3", "", ""},
+		{"lighthouse rc of latest", software.Lighthouse, lighthouse, "8.3.3-rc.1", "v8.3.3", "2026-11-09T07:12:58Z"},
+		{"lighthouse up to date", software.Lighthouse, lighthouse, "8.3.3", "", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -189,11 +189,11 @@ func TestFirstMissing(t *testing.T) {
 }
 
 func TestNewestKnown(t *testing.T) {
-	repo, _ := RepoFor(ethereum.Lighthouse)
+	repo, _ := software.RepoFor(software.Lighthouse)
 	rels := loadFixture(t, repo)
 	// The recorded Lighthouse data contains the pre-release v8.4.0-rc.0,
 	// newer than the latest stable v8.3.3.
-	newest, ok := NewestKnown(ethereum.Lighthouse, rels)
+	newest, ok := NewestKnown(software.Lighthouse, rels)
 	if !ok || newest.String() != "8.4.0-rc.0" {
 		t.Fatalf("NewestKnown = %s, %v; want 8.4.0-rc.0", newest, ok)
 	}
@@ -209,11 +209,11 @@ func TestNewestKnown(t *testing.T) {
 	}
 	for _, tt := range tests {
 		v, _ := ParseVersion(tt.running)
-		if got := NewerThanAll(ethereum.Lighthouse, rels, v); got != tt.want {
+		if got := NewerThanAll(software.Lighthouse, rels, v); got != tt.want {
 			t.Errorf("NewerThanAll(%s) = %v, want %v", tt.running, got, tt.want)
 		}
 	}
-	if NewerThanAll(ethereum.Lighthouse, nil, Version{Major: 1}) {
+	if NewerThanAll(software.Lighthouse, nil, Version{Major: 1}) {
 		t.Error("NewerThanAll with no data must be false")
 	}
 }

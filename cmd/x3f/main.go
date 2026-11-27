@@ -228,7 +228,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		global = append(global, f)
 	}
 	// Global entries are checked against the software of all nodes.
-	globalIgnore, _ := checkIgnoreList(cfg.IgnoreAdvisories, allSoftware(nodes), adv, true)
+	globalIgnore, _ := checkIgnoreList(cfg.IgnoreAdvisories, allInstalled(nodes), adv, true)
 	for _, f := range globalIgnore.Findings {
 		f.Message = "ignore_advisories: " + f.Message
 		global = append(global, f)

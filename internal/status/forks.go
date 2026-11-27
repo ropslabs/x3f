@@ -10,6 +10,7 @@ import (
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/forks"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // MaxForkDataAge is how old forks.yaml may be before x3f adds a note that
@@ -24,8 +25,8 @@ type ForkInput struct {
 	ChainID   uint64
 	HaveChain bool
 	// Versions of both clients; zero values if unknown or unreachable.
-	Execution ethereum.ClientVersion
-	Consensus ethereum.ClientVersion
+	Execution software.Reported
+	Consensus software.Reported
 	// The fork schedule as the node reports it (eth_config and
 	// /eth/v1/config/spec). nil if not available: then the *Err field
 	// says why, or the layer was unreachable (both nil).
@@ -122,14 +123,14 @@ func AssessForks(in ForkInput) ForkResult {
 // layer is one side of a node.
 type layer struct {
 	short, name string // "EL", "execution"
-	v           ethereum.ClientVersion
+	v           software.Reported
 }
 
 // subject names the client in messages: "Geth 1.17.9" if the version is
 // known, otherwise "the execution client".
 func (l layer) subject() string {
-	if l.v.Client != ethereum.Unknown && l.v.HasVersion() {
-		return fmt.Sprintf("%s %s", l.v.Client, l.v.Version)
+	if l.v.Name != software.Unknown && l.v.HasVersion() {
+		return fmt.Sprintf("%s %s", l.v.Name, l.v.Version)
 	}
 	return "the " + l.name + " client"
 }
@@ -159,12 +160,12 @@ func (c *forkCheck) problem(format string, a ...any) {
 func (c *forkCheck) notReady(l layer, why string) {
 	until := c.next.Time.Sub(c.in.Now)
 	min, haveRelease := releases.Version{}, false
-	if l.v.Client != ethereum.Unknown {
-		min, haveRelease = minVersionFor(c.n, c.next, l.v.Client)
+	if l.v.Name != software.Unknown {
+		min, haveRelease = minVersionFor(c.n, c.next, l.v.Name)
 	}
 	running, parsed := releases.ParseVersion(l.v.Version)
 	running.Suffix = l.v.Suffix
-	recentEnough := haveRelease && parsed && releases.Compare(l.v.Client, running, min) >= 0
+	recentEnough := haveRelease && parsed && releases.Compare(l.v.Name, running, min) >= 0
 	level := Warn
 	if haveRelease && until <= c.in.CriticalWithin {
 		level = Crit
@@ -178,10 +179,10 @@ func (c *forkCheck) notReady(l layer, why string) {
 		msg += fmt.Sprintf("; the release supports it (minimum %s), so check the node's chain configuration", min)
 	case haveRelease:
 		msg += fmt.Sprintf("; needs %s or later", min)
-	case l.v.Client == ethereum.Unknown:
+	case l.v.Name == software.Unknown:
 		msg += "; client not recognized, so it is unknown whether a ready release exists"
 	default:
-		msg += fmt.Sprintf("; no %s release announced yet (waiting for client release)", l.v.Client)
+		msg += fmt.Sprintf("; no %s release announced yet (waiting for client release)", l.v.Name)
 	}
 	c.r.add(level, "%s", msg)
 	c.nextParts = append(c.nextParts, l.short+" not ready")
@@ -209,7 +210,7 @@ func (c *forkCheck) unknownFork(l layer, what string, at time.Time) {
 func (c *forkCheck) oldSchedule(l layer, p forks.Fork, detail string) {
 	msg := fmt.Sprintf("%s still schedules the postponed %s at its former time (%s, %s)",
 		l.subject(), p.Name, p.Time.Format("2006-01-02 15:04 UTC"), detail)
-	if fixed, ok := p.RemovedIn[l.v.Client]; ok {
+	if fixed, ok := p.RemovedIn[l.v.Name]; ok {
 		msg += fmt.Sprintf("; update to %s or later", fixed)
 	}
 	if !p.Time.After(c.in.Now) {
@@ -401,7 +402,7 @@ func titleCase(s string) string {
 func (c *forkCheck) byVersion(l layer) {
 	n, r, v := c.n, c.r, l.v
 	running, ok := releases.ParseVersion(v.Version)
-	if v.Client == ethereum.Unknown || !v.HasVersion() || !ok {
+	if v.Name == software.Unknown || !v.HasVersion() || !ok {
 		if c.hasNext && v.Raw != "" {
 			r.add(Warn, "%s client not recognized: readiness for %s unknown", l.name, c.next.Name)
 			c.nextParts = append(c.nextParts, l.short+" unknown")
@@ -415,11 +416,11 @@ func (c *forkCheck) byVersion(l layer) {
 	// client: the node cannot follow the chain.
 	active := n.Active(c.in.Now)
 	for i := len(active) - 1; i >= 0; i-- {
-		min, ok := active[i].MinVersions[v.Client]
+		min, ok := active[i].MinVersions[v.Name]
 		if !ok {
 			continue
 		}
-		if releases.Compare(v.Client, running, min) < 0 {
+		if releases.Compare(v.Name, running, min) < 0 {
 			r.add(Crit, "%s is older than the minimum release for %s (%s): it cannot follow %s",
 				name, active[i].Name, min, n.Name)
 			c.problem("%s below %s minimum", l.short, active[i].Name)
@@ -430,9 +431,9 @@ func (c *forkCheck) byVersion(l layer) {
 	// b) Still contains the former schedule of a postponed fork: only
 	// releases from scheduled_in up to (not including) removed_in.
 	for _, p := range n.Postponed() {
-		from, ok1 := p.ScheduledIn[v.Client]
-		fixed, ok2 := p.RemovedIn[v.Client]
-		if !ok1 || !ok2 || releases.Compare(v.Client, running, from) < 0 || releases.Compare(v.Client, running, fixed) >= 0 {
+		from, ok1 := p.ScheduledIn[v.Name]
+		fixed, ok2 := p.RemovedIn[v.Name]
+		if !ok1 || !ok2 || releases.Compare(v.Name, running, from) < 0 || releases.Compare(v.Name, running, fixed) >= 0 {
 			continue
 		}
 		msg := fmt.Sprintf("%s still contains the postponed %s schedule (%s); update to %s or later",
@@ -449,13 +450,13 @@ func (c *forkCheck) byVersion(l layer) {
 		return
 	}
 	until := c.next.Time.Sub(c.in.Now)
-	min, ok := minVersionFor(n, c.next, v.Client)
+	min, ok := minVersionFor(n, c.next, v.Name)
 	switch {
 	case !ok:
 		r.add(Warn, "%s on %s in %s: no %s release announced yet (waiting for client release)",
-			c.next.Name, n.Name, days(until), v.Client)
+			c.next.Name, n.Name, days(until), v.Name)
 		c.nextParts = append(c.nextParts, l.short+" waiting for release")
-	case releases.Compare(v.Client, running, min) < 0:
+	case releases.Compare(v.Name, running, min) < 0:
 		level := Warn
 		if until <= c.in.CriticalWithin {
 			level = Crit
@@ -469,7 +470,7 @@ func (c *forkCheck) byVersion(l layer) {
 // minVersionFor returns the minimum release of client for fork f. A BPO
 // fork has no release list of its own; its releases are those announced
 // for the hard fork it belongs to (the latest earlier non-BPO fork).
-func minVersionFor(n forks.Network, f forks.Fork, client ethereum.ClientName) (releases.Version, bool) {
+func minVersionFor(n forks.Network, f forks.Fork, client software.Name) (releases.Version, bool) {
 	if !f.BPO {
 		v, ok := f.MinVersions[client]
 		return v, ok

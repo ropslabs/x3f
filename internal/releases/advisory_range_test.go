@@ -7,7 +7,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 func TestParseRange(t *testing.T) {
@@ -78,7 +78,7 @@ func TestParseFixes(t *testing.T) {
 }
 
 // recordedAdvisory returns one advisory from the recorded fixtures.
-func recordedAdvisory(t *testing.T, repo Repo, ghsa string) Advisory {
+func recordedAdvisory(t *testing.T, repo software.Repo, ghsa string) Advisory {
 	t.Helper()
 	var advs []Advisory
 	if err := json.Unmarshal(advisoryFixture(t, repo), &advs); err != nil {
@@ -95,58 +95,58 @@ func recordedAdvisory(t *testing.T, repo Repo, ghsa string) Advisory {
 
 func TestAdvisoryCheckRecorded(t *testing.T) {
 	var (
-		lighthouse = Repo{"sigp", "lighthouse"}
-		erigon     = Repo{"erigontech", "erigon"}
-		lodestar   = Repo{"ChainSafe", "lodestar"}
-		teku       = Repo{"Consensys-Incorporated", "teku"}
+		lighthouse = software.Repo{Owner: "sigp", Name: "lighthouse"}
+		erigon     = software.Repo{Owner: "erigontech", Name: "erigon"}
+		lodestar   = software.Repo{Owner: "ChainSafe", Name: "lodestar"}
+		teku       = software.Repo{Owner: "Consensys-Incorporated", Name: "teku"}
 	)
 	tests := []struct {
 		name    string
-		client  ethereum.ClientName
-		repo    Repo
+		client  software.Name
+		repo    software.Repo
 		ghsa    string
 		running string
 		want    Match
 		fix     string // "" means no fix
 	}{
 		// "<= 1.16.8", patched ">= 1.16.9"
-		{"geth at bound", ethereum.Geth, geth, "GHSA-m6j8-rg6r-7mv8", "1.16.8", Affected, "1.16.9"},
-		{"geth fixed", ethereum.Geth, geth, "GHSA-m6j8-rg6r-7mv8", "1.16.9", NotAffected, ""},
-		{"geth dev build of the fix", ethereum.Geth, geth, "GHSA-m6j8-rg6r-7mv8", "1.16.9-unstable", NotAffected, ""},
+		{"geth at bound", software.Geth, geth, "GHSA-m6j8-rg6r-7mv8", "1.16.8", Affected, "1.16.9"},
+		{"geth fixed", software.Geth, geth, "GHSA-m6j8-rg6r-7mv8", "1.16.9", NotAffected, ""},
+		{"geth dev build of the fix", software.Geth, geth, "GHSA-m6j8-rg6r-7mv8", "1.16.9-unstable", NotAffected, ""},
 		// ">= 1.14.0, < 1.14.13"
-		{"geth below range", ethereum.Geth, geth, "GHSA-q26p-9cq4-7fc2", "1.13.15", NotAffected, ""},
-		{"geth range start", ethereum.Geth, geth, "GHSA-q26p-9cq4-7fc2", "1.14.0", Affected, "1.14.13"},
-		{"geth range end", ethereum.Geth, geth, "GHSA-q26p-9cq4-7fc2", "1.14.13", NotAffected, ""},
+		{"geth below range", software.Geth, geth, "GHSA-q26p-9cq4-7fc2", "1.13.15", NotAffected, ""},
+		{"geth range start", software.Geth, geth, "GHSA-q26p-9cq4-7fc2", "1.14.0", Affected, "1.14.13"},
+		{"geth range end", software.Geth, geth, "GHSA-q26p-9cq4-7fc2", "1.14.13", NotAffected, ""},
 		// ">= v1.9.4, < 1.9.20"
-		{"geth v prefix", ethereum.Geth, geth, "GHSA-xw37-57qp-9mm4", "1.9.4", Affected, "1.9.20"},
+		{"geth v prefix", software.Geth, geth, "GHSA-xw37-57qp-9mm4", "1.9.4", Affected, "1.9.20"},
 		// ">= 24.5.2", patched "26.8.1": bounded by the fix.
-		{"besu open range below", ethereum.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "24.5.1", NotAffected, ""},
-		{"besu open range start", ethereum.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "24.5.2", Affected, "26.8.1"},
-		{"besu open range before fix", ethereum.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "26.8.0", Affected, "26.8.1"},
-		{"besu open range fixed", ethereum.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "26.8.1", NotAffected, ""},
-		{"besu open range newer", ethereum.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "26.10.2", NotAffected, ""},
+		{"besu open range below", software.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "24.5.1", NotAffected, ""},
+		{"besu open range start", software.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "24.5.2", Affected, "26.8.1"},
+		{"besu open range before fix", software.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "26.8.0", Affected, "26.8.1"},
+		{"besu open range fixed", software.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "26.8.1", NotAffected, ""},
+		{"besu open range newer", software.Besu, besu, "GHSA-p4h2-gvh4-pv6j", "26.10.2", NotAffected, ""},
 		// List "22.4.0-RC2,22.4.0,…,22.7.0-RC4", patched "22.7.1"
-		{"besu list rc", ethereum.Besu, besu, "GHSA-4456-w38r-m53x", "22.4.0-RC2", Affected, "22.7.1"},
-		{"besu list release", ethereum.Besu, besu, "GHSA-4456-w38r-m53x", "22.7.0", Affected, "22.7.1"},
-		{"besu not listed", ethereum.Besu, besu, "GHSA-4456-w38r-m53x", "22.5.0", NotAffected, ""},
-		{"besu list fixed", ethereum.Besu, besu, "GHSA-4456-w38r-m53x", "22.7.1", NotAffected, ""},
+		{"besu list rc", software.Besu, besu, "GHSA-4456-w38r-m53x", "22.4.0-RC2", Affected, "22.7.1"},
+		{"besu list release", software.Besu, besu, "GHSA-4456-w38r-m53x", "22.7.0", Affected, "22.7.1"},
+		{"besu not listed", software.Besu, besu, "GHSA-4456-w38r-m53x", "22.5.0", NotAffected, ""},
+		{"besu list fixed", software.Besu, besu, "GHSA-4456-w38r-m53x", "22.7.1", NotAffected, ""},
 		// "all", no patched version.
-		{"besu all without fix", ethereum.Besu, besu, "GHSA-v5gq-r843-8f73", "26.11.0", Unclear, ""},
+		{"besu all without fix", software.Besu, besu, "GHSA-v5gq-r843-8f73", "26.11.0", Unclear, ""},
 		// "< v7.0.0-beta.5", patched "v7.0.0-beta.5"
-		{"lighthouse pre-release", ethereum.Lighthouse, lighthouse, "GHSA-wm9c-xvqq-5c28", "7.0.0-beta.4", Affected, "7.0.0-beta.5"},
-		{"lighthouse release", ethereum.Lighthouse, lighthouse, "GHSA-wm9c-xvqq-5c28", "7.0.0", NotAffected, ""},
+		{"lighthouse pre-release", software.Lighthouse, lighthouse, "GHSA-wm9c-xvqq-5c28", "7.0.0-beta.4", Affected, "7.0.0-beta.5"},
+		{"lighthouse release", software.Lighthouse, lighthouse, "GHSA-wm9c-xvqq-5c28", "7.0.0", NotAffected, ""},
 		// "<8.3.0", patched ">=8.3.0"
-		{"lighthouse recent", ethereum.Lighthouse, lighthouse, "GHSA-rvxr-393q-q925", "8.2.1", Affected, "8.3.0"},
+		{"lighthouse recent", software.Lighthouse, lighthouse, "GHSA-rvxr-393q-q925", "8.2.1", Affected, "8.3.0"},
 		// ">=v3.1.0 and  <v3.4.0"
-		{"erigon before", ethereum.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.0.5", NotAffected, ""},
-		{"erigon start", ethereum.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.1.0", Affected, "3.4.0"},
-		{"erigon inside", ethereum.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.3.9", Affected, "3.4.0"},
-		{"erigon fixed", ethereum.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.4.0", NotAffected, ""},
+		{"erigon before", software.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.0.5", NotAffected, ""},
+		{"erigon start", software.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.1.0", Affected, "3.4.0"},
+		{"erigon inside", software.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.3.9", Affected, "3.4.0"},
+		{"erigon fixed", software.Erigon, erigon, "GHSA-4c6q-hpx8-75wm", "3.4.0", NotAffected, ""},
 		// "< 1.24.0", patched "1.25.0": the range decides, the fix is named.
-		{"lodestar affected", ethereum.Lodestar, lodestar, "GHSA-m9c9-mc2h-9wjw", "1.23.1", Affected, "1.25.0"},
-		{"lodestar not affected", ethereum.Lodestar, lodestar, "GHSA-m9c9-mc2h-9wjw", "1.24.0", NotAffected, ""},
+		{"lodestar affected", software.Lodestar, lodestar, "GHSA-m9c9-mc2h-9wjw", "1.23.1", Affected, "1.25.0"},
+		{"lodestar not affected", software.Lodestar, lodestar, "GHSA-m9c9-mc2h-9wjw", "1.24.0", NotAffected, ""},
 		// "<21.12.1"
-		{"teku log4j", ethereum.Teku, teku, "GHSA-mwfw-vm54-g3p7", "21.12.0", Affected, "21.12.1"},
+		{"teku log4j", software.Teku, teku, "GHSA-mwfw-vm54-g3p7", "21.12.0", Affected, "21.12.1"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -195,7 +195,7 @@ func TestAdvisoryCheckEdgeCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			running, _ := ParseVersion(tt.running)
-			m, fix, hasFix := Advisory{Vulnerabilities: tt.entries}.Check(ethereum.Geth, running)
+			m, fix, hasFix := Advisory{Vulnerabilities: tt.entries}.Check(software.Geth, running)
 			gotFix := ""
 			if hasFix {
 				gotFix = fix.String()
@@ -239,7 +239,7 @@ func TestRecordedRangesAreUnderstood(t *testing.T) {
 					t.Errorf("%s: patched %q not understood", a.GHSAID, e.PatchedVersions)
 				}
 			}
-			if m, _, _ := a.Check(ethereum.Geth, Version{Major: 1}); m == Unclear {
+			if m, _, _ := a.Check(software.Geth, Version{Major: 1}); m == Unclear {
 				unclear = append(unclear, a.GHSAID)
 			}
 		}

@@ -8,7 +8,7 @@ import (
 
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
-	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // checker checks one configured node. Every node type implements it, and
@@ -32,25 +32,25 @@ type checker interface {
 	query(ctx context.Context, timeout time.Duration)
 	// software lists what query found on the node, in a fixed order.
 	// Releases and advisories are fetched for it.
-	software() []software
+	software() []installed
 	// assess evaluates the result of query.
 	assess(up upstream, p assessParams) row
 }
 
-// software is one piece of software on a node, e.g. its execution client.
-type software struct {
+// installed is one piece of software on a node, e.g. its execution client.
+type installed struct {
 	// component is its role on the node, e.g. "execution". It is used as
 	// a metric label.
 	component string
-	// version is what the node reported. Its Client is Unknown if the
+	// version is what the node reported. Its Name is Unknown if the
 	// software was not recognized or could not be queried.
-	version ethereum.ClientVersion
+	version software.Reported
 }
 
 // upstream holds the data fetched from the software's repositories.
 type upstream struct {
-	rel map[releases.Repo]releaseData
-	adv map[releases.Repo]advisoryData
+	rel map[software.Repo]releaseData
+	adv map[software.Repo]advisoryData
 }
 
 // newChecker returns the checker for a node. config.Validate has already
@@ -76,9 +76,9 @@ func queryAll(ctx context.Context, nodes []checker, timeout time.Duration) {
 	wg.Wait()
 }
 
-// allSoftware returns the software of all nodes, node by node.
-func allSoftware(nodes []checker) []software {
-	var all []software
+// allInstalled returns the software of all nodes, node by node.
+func allInstalled(nodes []checker) []installed {
+	var all []installed
 	for _, n := range nodes {
 		all = append(all, n.software()...)
 	}

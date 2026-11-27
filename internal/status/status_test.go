@@ -11,6 +11,7 @@ import (
 
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // gethReleases loads the recorded geth releases from the releases package
@@ -46,7 +47,7 @@ func TestAssessVersion(t *testing.T) {
 	rels := gethReleases(t)
 	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 	fresh := &releases.Result{Releases: rels, FetchedAt: now.Add(-10 * time.Minute)}
-	geth := func(raw string) ethereum.ClientVersion { return ethereum.ParseClientVersion(raw) }
+	geth := func(raw string) software.Reported { return ethereum.ParseClientVersion(raw) }
 	grace := 30 * 24 * time.Hour
 
 	tests := []struct {

@@ -12,11 +12,13 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // advisoryFixture returns the recorded advisories of repo
 // (testdata/github/advisories, see SOURCES.md).
-func advisoryFixture(t *testing.T, repo Repo) []byte {
+func advisoryFixture(t *testing.T, repo software.Repo) []byte {
 	t.Helper()
 	body, err := os.ReadFile(filepath.Join("testdata", "github", "advisories", repo.Owner+"_"+repo.Name+".json"))
 	if err != nil {
@@ -39,7 +41,7 @@ type fakeAdvisories struct {
 	endless bool
 }
 
-func newFakeAdvisories(t *testing.T, repo Repo, pageSize int) *fakeAdvisories {
+func newFakeAdvisories(t *testing.T, repo software.Repo, pageSize int) *fakeAdvisories {
 	t.Helper()
 	var all []json.RawMessage
 	if err := json.Unmarshal(advisoryFixture(t, repo), &all); err != nil {
@@ -82,7 +84,7 @@ func newFakeAdvisories(t *testing.T, repo Repo, pageSize int) *fakeAdvisories {
 	return f
 }
 
-var besu = Repo{"besu-eth", "besu"}
+var besu = software.Repo{Owner: "besu-eth", Name: "besu"}
 
 func TestAdvisoriesFetchAndCache(t *testing.T) {
 	f := newFakeAdvisories(t, geth, 0)

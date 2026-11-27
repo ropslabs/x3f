@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 const (
@@ -110,7 +111,7 @@ type cacheEntry[T any] struct {
 // otherwise from GitHub. If GitHub fails but cached data exists, the cached
 // data is returned with RefreshErr set. An error is returned only if there
 // is no data at all.
-func (s *Source) Releases(ctx context.Context, repo Repo) (Result, error) {
+func (s *Source) Releases(ctx context.Context, repo software.Repo) (Result, error) {
 	r, err := getList[Release](ctx, s, repo, releasesList, false)
 	return releaseResult(r), err
 }
@@ -119,7 +120,7 @@ func (s *Source) Releases(ctx context.Context, repo Repo) (Result, error) {
 // a conditional request, so unchanged data costs little). Use it when the
 // cached data looks outdated, e.g. a node runs a version newer than every
 // cached release.
-func (s *Source) Refresh(ctx context.Context, repo Repo) (Result, error) {
+func (s *Source) Refresh(ctx context.Context, repo software.Repo) (Result, error) {
 	r, err := getList[Release](ctx, s, repo, releasesList, true)
 	return releaseResult(r), err
 }
@@ -131,7 +132,7 @@ func releaseResult(r listResult[Release]) Result {
 // getList is a generic function: T is Release or Advisory. Go methods
 // cannot have type parameters of their own, so this is a plain function
 // that takes the Source as an argument.
-func getList[T any](ctx context.Context, s *Source, repo Repo, l list, force bool) (listResult[T], error) {
+func getList[T any](ctx context.Context, s *Source, repo software.Repo, l list, force bool) (listResult[T], error) {
 	now := s.now()
 	cached, haveCache := readCache[T](s, repo, l)
 	if haveCache && !force && now.Sub(cached.FetchedAt) < s.TTL {
@@ -163,7 +164,7 @@ func getList[T any](ctx context.Context, s *Source, repo Repo, l list, force boo
 // fetchList asks GitHub for the list, following up to l.maxPages pages.
 // The ETag is only used for single-page lists: a 304 for the first page
 // says nothing about the later ones.
-func fetchList[T any](ctx context.Context, s *Source, repo Repo, l list, etag string) (items []T, notModified bool, newETag string, err error) {
+func fetchList[T any](ctx context.Context, s *Source, repo software.Repo, l list, etag string) (items []T, notModified bool, newETag string, err error) {
 	base := s.BaseURL
 	if base == "" {
 		base = DefaultBaseURL
@@ -205,7 +206,7 @@ func fetchList[T any](ctx context.Context, s *Source, repo Repo, l list, etag st
 
 // fetchPage requests one page. link is the URL of the next page from the
 // Link header, or empty.
-func fetchPage[T any](ctx context.Context, s *Source, pageURL string, repo Repo, l list, etag string) (items []T, notModified bool, newETag, link string, err error) {
+func fetchPage[T any](ctx context.Context, s *Source, pageURL string, repo software.Repo, l list, etag string) (items []T, notModified bool, newETag, link string, err error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
 	if err != nil {
 		return nil, false, "", "", err
@@ -296,13 +297,13 @@ func (s *Source) now() time.Time {
 	return time.Now()
 }
 
-func cachePath(s *Source, repo Repo, l list) string {
+func cachePath(s *Source, repo software.Repo, l list) string {
 	return filepath.Join(s.CacheDir, "github", repo.Owner, repo.Name+l.file)
 }
 
 // readCache returns the cached entry. Missing or unreadable cache files are
 // treated as "no cache"; the data is simply fetched again.
-func readCache[T any](s *Source, repo Repo, l list) (cacheEntry[T], bool) {
+func readCache[T any](s *Source, repo software.Repo, l list) (cacheEntry[T], bool) {
 	if s.CacheDir == "" {
 		return cacheEntry[T]{}, false
 	}
@@ -319,7 +320,7 @@ func readCache[T any](s *Source, repo Repo, l list) (cacheEntry[T], bool) {
 
 // writeCache stores an entry. Errors are ignored on purpose: a cache that
 // cannot be written only costs another request next time.
-func writeCache[T any](s *Source, repo Repo, l list, e cacheEntry[T]) {
+func writeCache[T any](s *Source, repo software.Repo, l list, e cacheEntry[T]) {
 	if s.CacheDir == "" {
 		return
 	}

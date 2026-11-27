@@ -13,6 +13,7 @@ import (
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // recorded loads a recorded GitHub list from the releases package (see
@@ -149,7 +150,7 @@ func TestAssessAdvisoriesFixNotReleased(t *testing.T) {
 	advs := recorded[releases.Advisory](t, "advisories", "sigp_lighthouse.json")
 	var before []releases.Release
 	for _, r := range recorded[releases.Release](t, "", "sigp_lighthouse.json") {
-		if v, ok := releases.ParseVersion(r.Tag); ok && releases.Compare(ethereum.Lighthouse, v, releases.Version{Major: 8, Minor: 3}) < 0 {
+		if v, ok := releases.ParseVersion(r.Tag); ok && releases.Compare(software.Lighthouse, v, releases.Version{Major: 8, Minor: 3}) < 0 {
 			before = append(before, r)
 		}
 	}
@@ -500,7 +501,7 @@ func TestAssessAdvisoriesMediumWithoutFixIsNote(t *testing.T) {
 	for _, running := range []string{"6.0.0", "6.1.0"} {
 		t.Run(running, func(t *testing.T) {
 			r := AssessAdvisories(AdvisoryInput{
-				Version:    ethereum.ClientVersion{Raw: running, Client: ethereum.Geth, Version: running},
+				Version:    software.Reported{Raw: running, Name: software.Geth, Version: running},
 				Advisories: &releases.AdvisoryResult{Advisories: advs, FetchedAt: now},
 				Now:        now,
 			})

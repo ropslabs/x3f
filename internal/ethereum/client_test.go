@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // refusedAddr is an address that refusingClient never connects to: dialing
@@ -111,21 +113,21 @@ func TestExecutionVersion(t *testing.T) {
 	tests := []struct {
 		fixture    string
 		wantRaw    string
-		wantClient ClientName
+		wantClient software.Name
 	}{
-		{"geth.json", "Geth/v1.17.10-stable-1df30b18/linux-amd64/go1.27.3", Geth},
-		{"reth.json", "reth/v2.11.0-b9abbcc1/x86_64-unknown-linux-gnu", Reth},
-		{"nethermind.json", "Nethermind/v2.2.2+be201120/linux-x64/dotnet10.0.14", Nethermind},
-		{"erigon.json", "erigon/3.8.2-8a3f3b2c/linux-amd64/go1.27.4", Erigon},
-		{"besu.json", "besu/v23.1.1-dev-ac23d311/osx-x86_64/graalvm-java-17", Besu},
+		{"geth.json", "Geth/v1.17.10-stable-1df30b18/linux-amd64/go1.27.3", software.Geth},
+		{"reth.json", "reth/v2.11.0-b9abbcc1/x86_64-unknown-linux-gnu", software.Reth},
+		{"nethermind.json", "Nethermind/v2.2.2+be201120/linux-x64/dotnet10.0.14", software.Nethermind},
+		{"erigon.json", "erigon/3.8.2-8a3f3b2c/linux-amd64/go1.27.4", software.Erigon},
+		{"besu.json", "besu/v23.1.1-dev-ac23d311/osx-x86_64/graalvm-java-17", software.Besu},
 		// Recorded live (SOURCES.md). Field order and whitespace differ
 		// between providers; the decoder must not care.
-		{"live/geth-publicnode-mainnet.json", "Geth/v1.17.9-stable-9dffe6e9/linux-amd64/go1.25.14", Geth},
-		{"live/reth-publicnode-sepolia.json", "reth/v2.11.0-b9abbcc/x86_64-unknown-linux-gnu", Reth},
-		{"live/reth-flashbots-mainnet.json", "reth/v2.6.0-73a3a00/x86_64-unknown-linux-gnu", Reth},
-		{"live/proxy-drpc-mainnet.json", "Geth/v10.0.0/drpc", Geth},
-		{"live/proxy-mevblocker-mainnet.json", "MEVblocker", Unknown},
-		{"live/proxy-cloudflare-mainnet.json", "cloudflare-ethereum", Unknown},
+		{"live/geth-publicnode-mainnet.json", "Geth/v1.17.9-stable-9dffe6e9/linux-amd64/go1.25.14", software.Geth},
+		{"live/reth-publicnode-sepolia.json", "reth/v2.11.0-b9abbcc/x86_64-unknown-linux-gnu", software.Reth},
+		{"live/reth-flashbots-mainnet.json", "reth/v2.6.0-73a3a00/x86_64-unknown-linux-gnu", software.Reth},
+		{"live/proxy-drpc-mainnet.json", "Geth/v10.0.0/drpc", software.Geth},
+		{"live/proxy-mevblocker-mainnet.json", "MEVblocker", software.Unknown},
+		{"live/proxy-cloudflare-mainnet.json", "cloudflare-ethereum", software.Unknown},
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {
@@ -138,7 +140,7 @@ func TestExecutionVersion(t *testing.T) {
 			if got != tt.wantRaw {
 				t.Errorf("got %q, want %q", got, tt.wantRaw)
 			}
-			if c := ParseClientVersion(got).Client; c != tt.wantClient {
+			if c := ParseClientVersion(got).Name; c != tt.wantClient {
 				t.Errorf("client = %s, want %s", c, tt.wantClient)
 			}
 		})
@@ -149,19 +151,19 @@ func TestConsensusVersion(t *testing.T) {
 	tests := []struct {
 		fixture    string
 		wantRaw    string
-		wantClient ClientName
+		wantClient software.Name
 	}{
-		{"spec-example.json", "Lighthouse/v0.1.5 (Linux x86_64)", Lighthouse},
-		{"lighthouse.json", "Lighthouse/v8.3.3-57c2abc/x86_64-linux", Lighthouse},
-		{"prysm.json", "Prysm/v7.3.2-844d8b8 (linux amd64)", Prysm},
-		{"teku.json", "teku/v26.10.3/linux-x86_64/-eclipseadoptium-openjdk64bitservervm-java-25", Teku},
-		{"nimbus.json", "Nimbus/v26.10.2-0abc0d-stateofus", Nimbus},
-		{"lodestar.json", "Lodestar/v1.51.0/7923280", Lodestar},
-		{"grandine.json", "Grandine/2.0.6-70a5c7ea/x86_64-linux", Grandine},
+		{"spec-example.json", "Lighthouse/v0.1.5 (Linux x86_64)", software.Lighthouse},
+		{"lighthouse.json", "Lighthouse/v8.3.3-57c2abc/x86_64-linux", software.Lighthouse},
+		{"prysm.json", "Prysm/v7.3.2-844d8b8 (linux amd64)", software.Prysm},
+		{"teku.json", "teku/v26.10.3/linux-x86_64/-eclipseadoptium-openjdk64bitservervm-java-25", software.Teku},
+		{"nimbus.json", "Nimbus/v26.10.2-0abc0d-stateofus", software.Nimbus},
+		{"lodestar.json", "Lodestar/v1.51.0/7923280", software.Lodestar},
+		{"grandine.json", "Grandine/2.0.6-70a5c7ea/x86_64-linux", software.Grandine},
 		// Recorded live (SOURCES.md).
-		{"live/lighthouse-publicnode-mainnet.json", "Lighthouse/v8.3.3-57c2abc/x86_64-linux", Lighthouse},
-		{"live/nimbus-unstable-mainnet.json", "Nimbus/v26.10.2-f64d64-stateofus", Nimbus},
-		{"live/lodestar-chainsafe-mainnet.json", "Lodestar/v1.51.0/7923280", Lodestar},
+		{"live/lighthouse-publicnode-mainnet.json", "Lighthouse/v8.3.3-57c2abc/x86_64-linux", software.Lighthouse},
+		{"live/nimbus-unstable-mainnet.json", "Nimbus/v26.10.2-f64d64-stateofus", software.Nimbus},
+		{"live/lodestar-chainsafe-mainnet.json", "Lodestar/v1.51.0/7923280", software.Lodestar},
 	}
 	for _, tt := range tests {
 		t.Run(tt.fixture, func(t *testing.T) {
@@ -175,7 +177,7 @@ func TestConsensusVersion(t *testing.T) {
 			if got != tt.wantRaw {
 				t.Errorf("got %q, want %q", got, tt.wantRaw)
 			}
-			if c := ParseClientVersion(got).Client; c != tt.wantClient {
+			if c := ParseClientVersion(got).Name; c != tt.wantClient {
 				t.Errorf("client = %s, want %s", c, tt.wantClient)
 			}
 		})

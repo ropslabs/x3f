@@ -10,7 +10,7 @@ import (
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/network"
-	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 	"github.com/ropslabs/x3f/internal/status"
 )
 
@@ -21,7 +21,7 @@ import (
 // the fork configuration; Go generics let both layers share this struct
 // and the code that fills it.
 type layerResult[S, F any] struct {
-	Version    ethereum.ClientVersion
+	Version    software.Reported
 	VersionErr error
 	Sync       S
 	SyncErr    error
@@ -69,8 +69,8 @@ func (n *ethereumNode) columns() []string {
 	return []string{"NETWORK", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC", "FORK", "ADVISORIES"}
 }
 
-func (n *ethereumNode) software() []software {
-	return []software{
+func (n *ethereumNode) software() []installed {
+	return []installed{
 		{component: "execution", version: n.r.Execution.Version},
 		{component: "consensus", version: n.r.Consensus.Version},
 	}
@@ -133,17 +133,17 @@ func queryLayer[S, F any](ctx context.Context, timeout time.Duration, endpoint s
 func (n *ethereumNode) assess(up upstream, p assessParams) row {
 	rel, adv := up.rel, up.adv
 	now, grace := p.now, p.grace
-	versionInput := func(v ethereum.ClientVersion, err error) status.VersionInput {
+	versionInput := func(v software.Reported, err error) status.VersionInput {
 		in := status.VersionInput{Version: v, Err: err, Now: now, Grace: grace}
-		if repo, ok := releases.RepoFor(v.Client); ok {
+		if repo, ok := software.RepoFor(v.Name); ok {
 			d := rel[repo]
 			in.Releases, in.ReleasesErr = d.result, d.err
 		}
 		return in
 	}
-	advisoryInput := func(v ethereum.ClientVersion, err error, ignore []config.AdvisoryIgnore) status.AdvisoryInput {
+	advisoryInput := func(v software.Reported, err error, ignore []config.AdvisoryIgnore) status.AdvisoryInput {
 		in := status.AdvisoryInput{Version: v, Err: err, Ignore: ignore, Now: now}
-		if repo, ok := releases.RepoFor(v.Client); ok {
+		if repo, ok := software.RepoFor(v.Name); ok {
 			d := adv[repo]
 			in.Advisories, in.AdvisoriesErr = d.result, d.err
 			in.Releases = rel[repo].result

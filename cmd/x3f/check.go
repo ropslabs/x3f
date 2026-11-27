@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/ropslabs/x3f/internal/config"
-	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/forks"
 	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 	"github.com/ropslabs/x3f/internal/status"
 )
 
@@ -46,12 +46,12 @@ type (
 
 // fetchReleases fetches the releases of every piece of software that was
 // detected, once per repository and concurrently.
-func fetchReleases(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[releases.Repo]releaseData {
+func fetchReleases(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[software.Repo]releaseData {
 	return fetchPerRepo(ctx, nodes, timeout, src.Releases)
 }
 
 // fetchAdvisories fetches the security advisories the same way.
-func fetchAdvisories(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[releases.Repo]advisoryData {
+func fetchAdvisories(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[software.Repo]advisoryData {
 	return fetchPerRepo(ctx, nodes, timeout, src.Advisories)
 }
 
@@ -59,16 +59,16 @@ func fetchAdvisories(ctx context.Context, src *releases.Source, nodes []checker,
 // of software, concurrently. fetch is a method value such as src.Releases;
 // Go infers T from its result type.
 func fetchPerRepo[T any](ctx context.Context, nodes []checker, timeout time.Duration,
-	fetch func(context.Context, releases.Repo) (T, error)) map[releases.Repo]repoData[T] {
+	fetch func(context.Context, software.Repo) (T, error)) map[software.Repo]repoData[T] {
 
-	var repos []releases.Repo
-	for _, s := range allSoftware(nodes) {
-		if repo, ok := releases.RepoFor(s.version.Client); ok && !slices.Contains(repos, repo) {
+	var repos []software.Repo
+	for _, s := range allInstalled(nodes) {
+		if repo, ok := software.RepoFor(s.version.Name); ok && !slices.Contains(repos, repo) {
 			repos = append(repos, repo)
 		}
 	}
 
-	data := make(map[releases.Repo]repoData[T], len(repos))
+	data := make(map[software.Repo]repoData[T], len(repos))
 	// Several goroutines write to the same map, which Go does not allow
 	// without synchronisation; the mutex makes the writes take turns.
 	var mu sync.Mutex
@@ -95,18 +95,18 @@ func fetchPerRepo[T any](ctx context.Context, nodes []checker, timeout time.Dura
 // cached data has no release as new as a version a node reports. Without
 // this, a release published after the last fetch would look like a proxy
 // or custom build until the cache expires.
-func refreshIfAhead(ctx context.Context, src *releases.Source, nodes []checker, rel map[releases.Repo]releaseData, timeout time.Duration) {
-	var stale []releases.Repo
-	for _, s := range allSoftware(nodes) {
+func refreshIfAhead(ctx context.Context, src *releases.Source, nodes []checker, rel map[software.Repo]releaseData, timeout time.Duration) {
+	var stale []software.Repo
+	for _, s := range allInstalled(nodes) {
 		v := s.version
-		repo, ok := releases.RepoFor(v.Client)
+		repo, ok := software.RepoFor(v.Name)
 		d := rel[repo]
 		if !ok || d.result == nil || !d.result.Cached || slices.Contains(stale, repo) {
 			continue
 		}
 		running, ok := releases.ParseVersion(v.Version)
 		running.Suffix = v.Suffix
-		if ok && releases.NewerThanAll(v.Client, d.result.Releases, running) {
+		if ok && releases.NewerThanAll(v.Name, d.result.Releases, running) {
 			stale = append(stale, repo)
 		}
 	}
@@ -243,23 +243,23 @@ func notifyChanges(ctx context.Context, tg *notify.Telegram, cfg *config.Telegra
 // global list. It does not run (ran is false) if a piece of software could
 // not be identified or its advisories are unknown: the ID might belong to
 // it.
-func checkIgnoreList(entries []config.AdvisoryIgnore, sw []software, adv map[releases.Repo]advisoryData, global bool) (a status.Assessment, ran bool) {
+func checkIgnoreList(entries []config.AdvisoryIgnore, sw []installed, adv map[software.Repo]advisoryData, global bool) (a status.Assessment, ran bool) {
 	if len(entries) == 0 {
 		return status.Assessment{}, true
 	}
 	var lists [][]releases.Advisory
-	var seen []releases.Repo
+	var seen []software.Repo
 	var names []string
 	for _, s := range sw {
 		v := s.version
-		repo, ok := releases.RepoFor(v.Client)
+		repo, ok := software.RepoFor(v.Name)
 		if !ok || adv[repo].result == nil {
 			return status.Assessment{}, false
 		}
 		if !slices.Contains(seen, repo) {
 			seen = append(seen, repo)
 			lists = append(lists, adv[repo].result.Advisories)
-			names = append(names, v.Client.String())
+			names = append(names, v.Name.String())
 		}
 	}
 	slices.Sort(names)
@@ -384,22 +384,22 @@ func printTable(w io.Writer, rows []row, color bool) error {
 
 // formatVersion renders a version cell, e.g. "Geth 1.17.10 (stable)", with
 // the latest release appended when the client is behind.
-func formatVersion(v ethereum.ClientVersion, err error, in status.VersionInput) string {
+func formatVersion(v software.Reported, err error, in status.VersionInput) string {
 	if err != nil {
 		return "ERROR"
 	}
-	if v.Client == ethereum.Unknown || !v.HasVersion() {
+	if v.Name == software.Unknown || !v.HasVersion() {
 		// Show what the client reported, so the user can still see it.
 		return fmt.Sprintf("unrecognized: %q", v.Raw)
 	}
-	s := v.Client.String() + " " + v.Version
+	s := v.Name.String() + " " + v.Version
 	if v.Suffix != "" {
 		s += " (" + v.Suffix + ")"
 	}
 	if latest, ok := status.Latest(in); ok {
 		running, _ := releases.ParseVersion(v.Version)
 		running.Suffix = v.Suffix
-		if releases.Compare(v.Client, running, latest) < 0 {
+		if releases.Compare(v.Name, running, latest) < 0 {
 			s += " -> " + latest.String()
 		}
 	}

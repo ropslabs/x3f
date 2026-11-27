@@ -9,8 +9,8 @@ import (
 	"unicode"
 
 	"github.com/ropslabs/x3f/internal/config"
-	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // Advisory rules (agreed for build step 5):
@@ -38,7 +38,7 @@ const MaxListedAdvisories = 3
 // AdvisoryInput is everything needed to assess the advisories of one
 // client.
 type AdvisoryInput struct {
-	Version ethereum.ClientVersion
+	Version software.Reported
 	// Err is the error of the version request; then nothing is assessed,
 	// the version rules already report it.
 	Err error
@@ -79,7 +79,7 @@ type affectedBy struct {
 func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 	var r AdvisoryResult
 	v := in.Version
-	repo, known := releases.RepoFor(v.Client)
+	repo, known := software.RepoFor(v.Name)
 	if in.Err != nil || !known || !v.HasVersion() {
 		return r
 	}
@@ -88,7 +88,7 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 		return r
 	}
 	running.Suffix = v.Suffix
-	name := fmt.Sprintf("%s %s", v.Client, v.Version)
+	name := fmt.Sprintf("%s %s", v.Name, v.Version)
 
 	if in.Advisories == nil {
 		r.add(Warn, "advisories unknown: %v", in.AdvisoriesErr)
@@ -113,7 +113,7 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 	var fixed, unfixed, unclear, ignored []affectedBy
 	var expired []config.AdvisoryIgnore
 	for _, a := range in.Advisories.Advisories {
-		m, fix, hasFix := a.Check(v.Client, running)
+		m, fix, hasFix := a.Check(v.Name, running)
 		if e, ok := ignore[strings.ToLower(a.GHSAID)]; ok {
 			if !e.Expired(in.Now) {
 				if m != releases.NotAffected {
@@ -127,7 +127,7 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 		case releases.Unclear:
 			unclear = append(unclear, affectedBy{adv: a})
 		case releases.Affected:
-			released := hasFix && (in.Releases == nil || releases.ReleasedAtLeast(v.Client, in.Releases.Releases, fix))
+			released := hasFix && (in.Releases == nil || releases.ReleasedAtLeast(v.Name, in.Releases.Releases, fix))
 			ab := affectedBy{adv: a, fix: fix, released: released}
 			if released {
 				fixed = append(fixed, ab)
@@ -145,7 +145,7 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 		}
 		fix := fixed[0].fix
 		for _, f := range fixed[1:] {
-			if releases.Compare(v.Client, f.fix, fix) > 0 {
+			if releases.Compare(v.Name, f.fix, fix) > 0 {
 				fix = f.fix
 			}
 		}

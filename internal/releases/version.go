@@ -6,11 +6,10 @@ import (
 	"cmp"
 	"fmt"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // Version is a numeric MAJOR.MINOR.PATCH version plus an optional suffix
@@ -56,107 +55,13 @@ func ParseVersion(s string) (v Version, ok bool) {
 	}, true
 }
 
-// SuffixKind classifies a version suffix.
-type SuffixKind int
-
-// The iota keyword numbers constants automatically: 0, 1, 2, 3.
-const (
-	KindRelease    SuffixKind = iota // "", "stable", "hotfix", Nimbus codename
-	KindPreRelease                   // alpha, beta, rc, pre, preview
-	KindDevBuild                     // dev, unstable, snapshot, nightly
-	KindUnknown                      // anything else, e.g. "mekong", "exp"
-)
-
-func (k SuffixKind) String() string {
-	switch k {
-	case KindRelease:
-		return "release"
-	case KindPreRelease:
-		return "pre-release"
-	case KindDevBuild:
-		return "dev build"
-	default:
-		return "unrecognized suffix"
-	}
-}
-
-var (
-	preReleasePrefixes = []string{"alpha", "beta", "rc", "pre"} // "pre" covers "preview"
-	devBuildPrefixes   = []string{"dev", "unstable", "snapshot", "nightly"}
-	releaseWords       = []string{"stable", "hotfix"}
-	hexRe              = regexp.MustCompile(`^[0-9a-f]{6,40}$`)
-)
-
-// ClassifySuffix decides what a suffix means for the given client.
-//
-// The suffix is split at "-", "." and "+" and each part is checked, ignoring
-// case: "rc.1", "RC1" and "rc0" are all pre-releases. Numbers and commit
-// hashes are skipped. If parts disagree, the most cautious kind wins:
-// dev build, then pre-release, then unknown, then release.
-func ClassifySuffix(client ethereum.ClientName, suffix string) SuffixKind {
-	// Nimbus always appends its codename (versionBlob, e.g. "stateofus");
-	// it never marks pre-releases there.
-	if client == ethereum.Nimbus {
-		return KindRelease
-	}
-	kind := classifyParts(suffix)
-
-	// Ethrex puts a "channel" between version and commit: "stable"
-	// (promoted release image), "release" (final tag build), "HEAD"
-	// (release binaries, built from a detached tag checkout), "rc.N"
-	// (release candidate) or else the git branch of the build.
-	if client == ethereum.Ethrex {
-		switch strings.ToLower(suffix) {
-		case "", "stable", "release", "head":
-			return KindRelease
-		}
-		if kind == KindPreRelease {
-			return kind
-		}
-		return KindDevBuild
-	}
-	return kind
-}
-
-// classifyParts is the client-independent part of ClassifySuffix.
-func classifyParts(suffix string) SuffixKind {
-	var dev, pre, unknown bool
-	parts := strings.FieldsFunc(strings.ToLower(suffix), func(r rune) bool {
-		return r == '-' || r == '.' || r == '+'
-	})
-	for _, p := range parts {
-		switch {
-		case isDigits(p) || hexRe.MatchString(p):
-			// Build numbers, dates and commits say nothing about the kind.
-		case hasAnyPrefix(p, devBuildPrefixes):
-			dev = true
-		case hasAnyPrefix(p, preReleasePrefixes):
-			pre = true
-		case slices.Contains(releaseWords, p):
-			// Explicit release marker.
-		default:
-			unknown = true
-		}
-	}
-	switch {
-	case dev:
-		return KindDevBuild
-	case pre:
-		return KindPreRelease
-	case unknown:
-		return KindUnknown
-	default:
-		return KindRelease
-	}
-}
-
 // Compare returns -1, 0 or +1 depending on whether a is older than, equal
 // to or newer than b. The numeric parts are compared first. For equal
 // numbers, a pre-release (or dev build, or unknown suffix) is older than the
 // release, and a hotfix is newer than the plain release, as in SemVer. Two
 // pre-releases of the same version are ordered by their suffix: rc.1 <
 // rc.2 < rc.10, alpha < beta < rc.
-func Compare(client ethereum.ClientName, a, b Version) int {
+func Compare(client software.Name, a, b Version) int {
 	if c := cmp.Compare(a.Major, b.Major); c != 0 {
 		return c
 	}
@@ -238,8 +143,8 @@ func runs(s string) []string {
 	return out
 }
 
-func rank(client ethereum.ClientName, suffix string) int {
-	if ClassifySuffix(client, suffix) != KindRelease {
+func rank(client software.Name, suffix string) int {
+	if software.ClassifySuffix(client, suffix) != software.KindRelease {
 		return 0
 	}
 	if strings.Contains(strings.ToLower(suffix), "hotfix") {
@@ -255,13 +160,4 @@ func isDigits(s string) bool {
 		}
 	}
 	return s != ""
-}
-
-func hasAnyPrefix(s string, prefixes []string) bool {
-	for _, p := range prefixes {
-		if strings.HasPrefix(s, p) {
-			return true
-		}
-	}
-	return false
 }

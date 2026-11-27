@@ -10,14 +10,15 @@ import (
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/forks"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 var forkNow = time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
 
-// cv builds a ClientVersion from a version string in the client's real
+// cv builds a software.Reported from a version string in the client's real
 // format (see internal/ethereum/testdata/SOURCES.md); the versions
 // themselves are chosen for the test.
-func cv(raw string) ethereum.ClientVersion { return ethereum.ParseClientVersion(raw) }
+func cv(raw string) software.Reported { return ethereum.ParseClientVersion(raw) }
 
 func TestAssessForksBuiltInSchedule(t *testing.T) {
 	s, err := forks.Default()
@@ -30,7 +31,7 @@ func TestAssessForksBuiltInSchedule(t *testing.T) {
 	tests := []struct {
 		name      string
 		chain     uint64
-		el, cl    ethereum.ClientVersion
+		el, cl    software.Reported
 		wantLevel Level
 		wantCell  string
 		wantMsgs  []string
@@ -169,7 +170,7 @@ func TestAssessForksNextFork(t *testing.T) {
 	tests := []struct {
 		name      string
 		s         *forks.Schedule
-		el, cl    ethereum.ClientVersion
+		el, cl    software.Reported
 		wantLevel Level
 		wantCell  string
 		wantMsgs  []string
@@ -248,7 +249,7 @@ func TestAssessForksPostponedIsARange(t *testing.T) {
 	// Explicit cases (version strings in the clients' real formats).
 	tests := []struct {
 		name      string
-		el, cl    ethereum.ClientVersion
+		el, cl    software.Reported
 		wantLevel Level
 	}{
 		{"geth 1.17.5, never had the schedule", cv("Geth/v1.17.5-stable-aaaaaaaa/linux-amd64/go1.27.3"), lodestar, OK},
@@ -298,8 +299,8 @@ func TestAssessForksPostponedIsARange(t *testing.T) {
 			}{"before scheduled_in", below, false})
 		}
 		for _, c := range cases {
-			v := ethereum.ClientVersion{
-				Raw: "test", Client: client, Suffix: c.v.Suffix,
+			v := software.Reported{
+				Raw: "test", Name: client, Suffix: c.v.Suffix,
 				Version: fmt.Sprintf("%d.%d.%d", c.v.Major, c.v.Minor, c.v.Patch),
 			}
 			in := ForkInput{Schedule: s, ChainID: hoodi, HaveChain: true, Now: forkNow, CriticalWithin: 14 * 24 * time.Hour}
@@ -340,9 +341,9 @@ func before(v releases.Version) (releases.Version, bool) {
 	return v, false
 }
 
-func isConsensus(c ethereum.ClientName) bool {
+func isConsensus(c software.Name) bool {
 	switch c {
-	case ethereum.Lighthouse, ethereum.Prysm, ethereum.Teku, ethereum.Nimbus, ethereum.Lodestar, ethereum.Grandine:
+	case software.Lighthouse, software.Prysm, software.Teku, software.Nimbus, software.Lodestar, software.Grandine:
 		return true
 	}
 	return false
@@ -395,7 +396,7 @@ func TestAssessForksNodeAnswer(t *testing.T) {
 	tests := []struct {
 		name      string
 		chain     uint64
-		el, cl    ethereum.ClientVersion
+		el, cl    software.Reported
 		elCfg     *ethereum.ExecutionForkConfig
 		elErr     error
 		clCfg     *ethereum.ConsensusForkConfig
@@ -534,7 +535,7 @@ func TestAssessForksNodeNextFork(t *testing.T) {
 	tests := []struct {
 		name      string
 		s         *forks.Schedule
-		el        ethereum.ClientVersion
+		el        software.Reported
 		elCfg     *ethereum.ExecutionForkConfig
 		clCfg     *ethereum.ConsensusForkConfig
 		wantLevel Level
@@ -612,7 +613,7 @@ func TestAssessForksRescheduled(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		el, cl    ethereum.ClientVersion
+		el, cl    software.Reported
 		elCfg     *ethereum.ExecutionForkConfig
 		clCfg     *ethereum.ConsensusForkConfig
 		wantLevel Level

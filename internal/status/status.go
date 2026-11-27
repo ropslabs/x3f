@@ -27,6 +27,7 @@ import (
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/network"
 	"github.com/ropslabs/x3f/internal/releases"
+	"github.com/ropslabs/x3f/internal/software"
 )
 
 // Level is the severity of an assessment.
@@ -99,7 +100,7 @@ const (
 
 // VersionInput is everything needed to assess a client version.
 type VersionInput struct {
-	Version ethereum.ClientVersion
+	Version software.Reported
 	// Err is the error of the version request, if any.
 	Err error
 	// Releases is the GitHub data; nil if it could not be obtained.
@@ -123,7 +124,7 @@ func AssessVersion(in VersionInput) Assessment {
 	}
 
 	v := in.Version
-	if v.Client == ethereum.Unknown || !v.HasVersion() {
+	if v.Name == software.Unknown || !v.HasVersion() {
 		a.add(Warn, "client or version not recognized: %q", v.Raw)
 		return a
 	}
@@ -133,30 +134,30 @@ func AssessVersion(in VersionInput) Assessment {
 		return a
 	}
 	running.Suffix = v.Suffix
-	name := fmt.Sprintf("%s %s", v.Client, v.Version)
+	name := fmt.Sprintf("%s %s", v.Name, v.Version)
 
-	kind := releases.ClassifySuffix(v.Client, v.Suffix)
+	kind := software.ClassifySuffix(v.Name, v.Suffix)
 	var rels []releases.Release
 	if in.Releases != nil {
 		rels = in.Releases.Releases
 	}
-	latest, haveLatest := releases.LatestStable(v.Client, rels)
-	missing, outdated := releases.FirstMissing(v.Client, rels, running)
+	latest, haveLatest := releases.LatestStable(v.Name, rels)
+	missing, outdated := releases.FirstMissing(v.Name, rels, running)
 	missingVersion, _ := releases.ParseVersion(missing.Tag)
 
 	// A pre-release or dev build whose own stable release is already out
 	// (e.g. 23.1.1-dev while 23.1.1 exists) gets one combined finding
 	// that says exactly that, instead of "is a dev build" plus an
 	// "outdated" line that would name 23.1.1 as the newer release.
-	merge := outdated && kind != releases.KindRelease && !missing.PublishedAt.IsZero() &&
+	merge := outdated && kind != software.KindRelease && !missing.PublishedAt.IsZero() &&
 		sameNumbers(missingVersion, running)
 	if !merge {
 		switch kind {
-		case releases.KindPreRelease:
+		case software.KindPreRelease:
 			a.add(Warn, "%s is a pre-release (%q)", name, v.Suffix)
-		case releases.KindDevBuild:
+		case software.KindDevBuild:
 			a.add(Warn, "%s is a dev build (%q)", name, v.Suffix)
-		case releases.KindUnknown:
+		case software.KindUnknown:
 			a.add(Warn, "%s has an unrecognized suffix (%q)", name, v.Suffix)
 		}
 	}
@@ -186,8 +187,8 @@ func AssessVersion(in VersionInput) Assessment {
 		// before assessing, so a just-published release does not end up
 		// here. Pre-releases and dev builds ahead of the latest release
 		// are expected and already yellow.
-		if kind == releases.KindRelease && releases.NewerThanAll(v.Client, rels, running) {
-			newest, _ := releases.NewestKnown(v.Client, rels)
+		if kind == software.KindRelease && releases.NewerThanAll(v.Name, rels, running) {
+			newest, _ := releases.NewestKnown(v.Name, rels)
 			a.add(Warn, "%s is newer than any known release (newest %s): proxy or custom build?", name, newest)
 		}
 		return a
@@ -207,7 +208,7 @@ func AssessVersion(in VersionInput) Assessment {
 		// e.g. "Besu dev build of 23.1.1 ("dev"): stable 23.1.1 released
 		// 1357 days ago; latest 26.11.2 (grace period 30 days)"
 		a.add(level, "%s %s: stable %s released %s ago; latest %s (grace period %s)",
-			v.Client, describeBuild(kind, missingVersion, v.Suffix), missingVersion, days(behind), latest, days(in.Grace))
+			v.Name, describeBuild(kind, missingVersion, v.Suffix), missingVersion, days(behind), latest, days(in.Grace))
 		return a
 	}
 	a.add(level, "%s outdated: latest %s; first newer release %s published %s ago (grace period %s)",
@@ -231,11 +232,11 @@ func sameNumbers(a, b releases.Version) bool {
 }
 
 // describeBuild names a non-release build, e.g. `dev build of 23.1.1 ("dev")`.
-func describeBuild(kind releases.SuffixKind, v releases.Version, suffix string) string {
+func describeBuild(kind software.Kind, v releases.Version, suffix string) string {
 	switch kind {
-	case releases.KindPreRelease:
+	case software.KindPreRelease:
 		return fmt.Sprintf("pre-release of %s (%q)", v, suffix)
-	case releases.KindDevBuild:
+	case software.KindDevBuild:
 		return fmt.Sprintf("dev build of %s (%q)", v, suffix)
 	default:
 		return fmt.Sprintf("build of %s with unrecognized suffix (%q)", v, suffix)
@@ -248,7 +249,7 @@ func Latest(in VersionInput) (releases.Version, bool) {
 	if in.Releases == nil || in.Err != nil {
 		return releases.Version{}, false
 	}
-	return releases.LatestStable(in.Version.Client, in.Releases.Releases)
+	return releases.LatestStable(in.Version.Name, in.Releases.Releases)
 }
 
 // SyncInput describes the outcome of a sync request.
