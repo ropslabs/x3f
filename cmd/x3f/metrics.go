@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
-	"github.com/ropslabs/x3f/internal/forks"
 	"github.com/ropslabs/x3f/internal/metrics"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/status"
@@ -27,7 +26,7 @@ const checkUnknown = 3
 var severityLabels = []string{"critical", "high", "medium", "low", "none"}
 
 // buildMetrics returns all metric families of a run.
-func buildMetrics(results []nodeResult, rows []row, rel map[releases.Repo]releaseData, schedule *forks.Schedule, success bool, now time.Time) []metrics.Family {
+func buildMetrics(nodes []checker, rows []row, rel map[releases.Repo]releaseData, success bool, now time.Time) []metrics.Family {
 	nodeStatus := metrics.Family{Name: "x3f_node_status", Help: "Status of a node: 0 OK, 1 WARN, 2 CRIT."}
 	checkStatus := metrics.Family{Name: "x3f_check_status", Help: "Status of one check of a node: 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run)."}
 	advisories := metrics.Family{Name: "x3f_advisories", Help: "Published security advisories that affect a client and are not ignored, by severity."}
@@ -44,15 +43,11 @@ func buildMetrics(results []nodeResult, rows []row, rel map[releases.Repo]releas
 				Value:  value,
 			})
 		}
-		for _, comp := range []string{"execution", "consensus"} {
-			counts, ok := r.advisories[comp]
-			if !ok {
-				continue
-			}
+		for _, c := range r.advisories {
 			for _, sev := range severityLabels {
 				advisories.Samples = append(advisories.Samples, metrics.Sample{
-					Labels: []metrics.Label{node, {Name: "component", Value: comp}, {Name: "severity", Value: sev}},
-					Value:  float64(counts[sev]),
+					Labels: []metrics.Label{node, {Name: "component", Value: c.component}, {Name: "severity", Value: sev}},
+					Value:  float64(c.counts[sev]),
 				})
 			}
 		}
@@ -61,21 +56,16 @@ func buildMetrics(results []nodeResult, rows []row, rel map[releases.Repo]releas
 	clientInfo := metrics.Family{Name: "x3f_client_info", Help: "Client and version a node runs; build is release, prerelease, dev or unknown."}
 	latestInfo := metrics.Family{Name: "x3f_client_latest_info", Help: "Highest stable release of a client known from GitHub."}
 	var latestDone []ethereum.ClientName
-	var networks []forks.Network
-	for _, r := range results {
-		components := []struct {
-			name string
-			v    ethereum.ClientVersion
-		}{{"execution", r.Execution.Version}, {"consensus", r.Consensus.Version}}
-		for _, c := range components {
-			v := c.v
+	for _, n := range nodes {
+		for _, s := range n.software() {
+			v := s.version
 			running, ok := releases.ParseVersion(v.Version)
 			if v.Client == ethereum.Unknown || !v.HasVersion() || !ok {
 				continue
 			}
 			client := strings.ToLower(v.Client.String())
 			clientInfo.Samples = append(clientInfo.Samples, metrics.Sample{Labels: []metrics.Label{
-				{Name: "node", Value: r.Name}, {Name: "component", Value: c.name}, {Name: "client", Value: client},
+				{Name: "node", Value: n.name()}, {Name: "component", Value: s.component}, {Name: "client", Value: client},
 				{Name: "version", Value: plainVersion(running)}, {Name: "build", Value: buildLabel(releases.ClassifySuffix(v.Client, v.Suffix))},
 			}, Value: 1})
 
@@ -88,19 +78,19 @@ func buildMetrics(results []nodeResult, rows []row, rel map[releases.Repo]releas
 				}
 			}
 		}
-		if id, ok := detectedChain(r); ok && schedule != nil {
-			if n, ok := schedule.ForChainID(id); ok && !slices.ContainsFunc(networks, func(x forks.Network) bool { return x.Name == n.Name }) {
-				networks = append(networks, n)
-			}
-		}
 	}
 
 	nextFork := metrics.Family{Name: "x3f_next_fork_timestamp_seconds", Help: "Activation time of the next scheduled fork of a network the nodes are on (Unix time)."}
-	for _, n := range networks {
-		if f, ok := n.Next(now); ok {
+	var networks []string
+	for _, r := range rows {
+		for _, f := range r.nextForks {
+			if slices.Contains(networks, f.network) {
+				continue
+			}
+			networks = append(networks, f.network)
 			nextFork.Samples = append(nextFork.Samples, metrics.Sample{Labels: []metrics.Label{
-				{Name: "network", Value: n.Name}, {Name: "fork", Value: f.Name},
-			}, Value: float64(f.Time.Unix())})
+				{Name: "network", Value: f.network}, {Name: "fork", Value: f.fork},
+			}, Value: float64(f.at.Unix())})
 		}
 	}
 

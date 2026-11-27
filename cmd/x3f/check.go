@@ -58,35 +58,45 @@ type nodeResult struct {
 	Consensus layerResult[ethereum.ConsensusSyncStatus, ethereum.ConsensusForkConfig]
 }
 
-// checkNodes queries all nodes concurrently and returns one result per node,
-// in config order. Each request gets its own timeout.
-func checkNodes(ctx context.Context, client *ethereum.Client, nodes []config.Node, timeout time.Duration) []nodeResult {
-	results := make([]nodeResult, len(nodes))
+// ethereumNode checks an Ethereum node: an execution client and a
+// consensus client.
+type ethereumNode struct {
+	cfg    config.Node
+	client *ethereum.Client
+	r      nodeResult
+}
 
-	// A WaitGroup waits for a set of goroutines to finish. wg.Go starts f
-	// in a new goroutine and tracks it; wg.Wait blocks until all are done.
-	var wg sync.WaitGroup
-	for i, n := range nodes {
-		results[i].Name = n.Name
-		results[i].Network = n.Network
-		results[i].Ignore = n.IgnoreAdvisories
-		// Since Go 1.22 every loop iteration has its own i and n, so the
-		// goroutines below capture this iteration's values.
-		//
-		// Execution and consensus side run in parallel. The two goroutines
-		// write to different fields of results[i]; distinct fields are
-		// distinct memory, so no mutex is needed.
-		wg.Go(func() {
-			results[i].Execution = queryLayer(ctx, timeout, n.ExecutionURL,
-				client.ExecutionVersion, client.ExecutionSync, client.ExecutionChainID, client.ExecutionForkConfig)
-		})
-		wg.Go(func() {
-			results[i].Consensus = queryLayer(ctx, timeout, n.BeaconURL,
-				client.ConsensusVersion, client.ConsensusSync, client.ConsensusChainID, client.ConsensusForkConfig)
-		})
+func (n *ethereumNode) name() string { return n.cfg.Name }
+func (n *ethereumNode) typ() string  { return config.TypeEthereum }
+
+func (n *ethereumNode) columns() []string {
+	return []string{"NETWORK", "EXECUTION", "EL SYNC", "CONSENSUS", "CL SYNC", "FORK", "ADVISORIES"}
+}
+
+func (n *ethereumNode) software() []software {
+	return []software{
+		{component: "execution", version: n.r.Execution.Version},
+		{component: "consensus", version: n.r.Consensus.Version},
 	}
+}
+
+// query asks both clients; each request gets its own timeout.
+func (n *ethereumNode) query(ctx context.Context, timeout time.Duration) {
+	cfg, client := n.cfg, n.client
+	n.r = nodeResult{Name: cfg.Name, Network: cfg.Network, Ignore: cfg.IgnoreAdvisories}
+	// Execution and consensus side run in parallel. The two goroutines
+	// write to different fields of n.r; distinct fields are distinct
+	// memory, so no mutex is needed.
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		n.r.Execution = queryLayer(ctx, timeout, cfg.ExecutionURL,
+			client.ExecutionVersion, client.ExecutionSync, client.ExecutionChainID, client.ExecutionForkConfig)
+	})
+	wg.Go(func() {
+		n.r.Consensus = queryLayer(ctx, timeout, cfg.BeaconURL,
+			client.ConsensusVersion, client.ConsensusSync, client.ConsensusChainID, client.ConsensusForkConfig)
+	})
 	wg.Wait()
-	return results
 }
 
 // queryLayer asks one client for its version, then its sync status, chain
@@ -148,29 +158,27 @@ type (
 	advisoryData = repoData[releases.AdvisoryResult]
 )
 
-// fetchReleases fetches the releases of every client that was detected,
-// once per repository and concurrently.
-func fetchReleases(ctx context.Context, src *releases.Source, results []nodeResult, timeout time.Duration) map[releases.Repo]releaseData {
-	return fetchPerRepo(ctx, results, timeout, src.Releases)
+// fetchReleases fetches the releases of every piece of software that was
+// detected, once per repository and concurrently.
+func fetchReleases(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[releases.Repo]releaseData {
+	return fetchPerRepo(ctx, nodes, timeout, src.Releases)
 }
 
 // fetchAdvisories fetches the security advisories the same way.
-func fetchAdvisories(ctx context.Context, src *releases.Source, results []nodeResult, timeout time.Duration) map[releases.Repo]advisoryData {
-	return fetchPerRepo(ctx, results, timeout, src.Advisories)
+func fetchAdvisories(ctx context.Context, src *releases.Source, nodes []checker, timeout time.Duration) map[releases.Repo]advisoryData {
+	return fetchPerRepo(ctx, nodes, timeout, src.Advisories)
 }
 
-// fetchPerRepo calls fetch once for the repository of every detected
-// client, concurrently. fetch is a method value such as src.Releases; Go
-// infers T from its result type.
-func fetchPerRepo[T any](ctx context.Context, results []nodeResult, timeout time.Duration,
+// fetchPerRepo calls fetch once for the repository of every detected piece
+// of software, concurrently. fetch is a method value such as src.Releases;
+// Go infers T from its result type.
+func fetchPerRepo[T any](ctx context.Context, nodes []checker, timeout time.Duration,
 	fetch func(context.Context, releases.Repo) (T, error)) map[releases.Repo]repoData[T] {
 
 	var repos []releases.Repo
-	for _, r := range results {
-		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
-			if repo, ok := releases.RepoFor(v.Client); ok && !slices.Contains(repos, repo) {
-				repos = append(repos, repo)
-			}
+	for _, s := range allSoftware(nodes) {
+		if repo, ok := releases.RepoFor(s.version.Client); ok && !slices.Contains(repos, repo) {
+			repos = append(repos, repo)
 		}
 	}
 
@@ -201,20 +209,19 @@ func fetchPerRepo[T any](ctx context.Context, results []nodeResult, timeout time
 // cached data has no release as new as a version a node reports. Without
 // this, a release published after the last fetch would look like a proxy
 // or custom build until the cache expires.
-func refreshIfAhead(ctx context.Context, src *releases.Source, results []nodeResult, rel map[releases.Repo]releaseData, timeout time.Duration) {
+func refreshIfAhead(ctx context.Context, src *releases.Source, nodes []checker, rel map[releases.Repo]releaseData, timeout time.Duration) {
 	var stale []releases.Repo
-	for _, r := range results {
-		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
-			repo, ok := releases.RepoFor(v.Client)
-			d := rel[repo]
-			if !ok || d.result == nil || !d.result.Cached || slices.Contains(stale, repo) {
-				continue
-			}
-			running, ok := releases.ParseVersion(v.Version)
-			running.Suffix = v.Suffix
-			if ok && releases.NewerThanAll(v.Client, d.result.Releases, running) {
-				stale = append(stale, repo)
-			}
+	for _, s := range allSoftware(nodes) {
+		v := s.version
+		repo, ok := releases.RepoFor(v.Client)
+		d := rel[repo]
+		if !ok || d.result == nil || !d.result.Cached || slices.Contains(stale, repo) {
+			continue
+		}
+		running, ok := releases.ParseVersion(v.Version)
+		running.Suffix = v.Suffix
+		if ok && releases.NewerThanAll(v.Client, d.result.Releases, running) {
+			stale = append(stale, repo)
 		}
 	}
 	// Usually zero or one repository; sequential is fine.
@@ -230,13 +237,33 @@ func refreshIfAhead(ctx context.Context, src *releases.Source, results []nodeRes
 
 // row is one table row with its assessments.
 type row struct {
-	node     string
-	level    status.Level
-	cells    [7]string // network, execution, EL sync, consensus, CL sync, fork, advisories
+	node string
+	// typ and columns come from the node's checker; rows of one type form
+	// one table.
+	typ     string
+	columns []string
+	level   status.Level
+	// cells has one entry per column.
+	cells    []string
 	findings []layerFindings
 	// advisories holds the advisory counts per severity of each assessed
-	// component ("execution", "consensus"), for the metrics.
-	advisories map[string]map[string]int
+	// component, in the order of the node's software, for the metrics.
+	advisories []componentCounts
+	// nextForks are the next scheduled forks of the networks the node is
+	// on, for the metrics.
+	nextForks []nextFork
+}
+
+// componentCounts are the advisory counts per severity of one component.
+type componentCounts struct {
+	component string
+	counts    map[string]int
+}
+
+// nextFork is the next scheduled fork of a network.
+type nextFork struct {
+	network, fork string
+	at            time.Time
 }
 
 // layerFindings are the findings of one part of a node, e.g. "execution
@@ -260,8 +287,26 @@ type assessParams struct {
 	ignore []config.AdvisoryIgnore
 }
 
-// assess evaluates all results. It returns the rows and the overall level.
-func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[releases.Repo]advisoryData, p assessParams) ([]row, status.Level) {
+// assessAll evaluates all nodes. It returns the rows, in config order, and
+// the overall level.
+func assessAll(nodes []checker, up upstream, p assessParams) ([]row, status.Level) {
+	overall := status.OK
+	rows := make([]row, 0, len(nodes))
+	for _, n := range nodes {
+		rw := n.assess(up, p)
+		rw.node, rw.typ, rw.columns = n.name(), n.typ(), n.columns()
+		for _, x := range rw.findings {
+			rw.level = max(rw.level, x.Level)
+		}
+		overall = max(overall, rw.level)
+		rows = append(rows, rw)
+	}
+	return rows, overall
+}
+
+// assess evaluates the node's result.
+func (n *ethereumNode) assess(up upstream, p assessParams) row {
+	rel, adv := up.rel, up.adv
 	now, grace := p.now, p.grace
 	versionInput := func(v ethereum.ClientVersion, err error) status.VersionInput {
 		in := status.VersionInput{Version: v, Err: err, Now: now, Grace: grace}
@@ -281,67 +326,64 @@ func assess(results []nodeResult, rel map[releases.Repo]releaseData, adv map[rel
 		return in
 	}
 
-	overall := status.OK
-	rows := make([]row, 0, len(results))
-	for _, r := range results {
-		ev := versionInput(r.Execution.Version, r.Execution.VersionErr)
-		cv := versionInput(r.Consensus.Version, r.Consensus.VersionErr)
-		chainID, haveChain := detectedChain(r)
-		fork := status.AssessForks(status.ForkInput{
-			Schedule: p.schedule, ChainID: chainID, HaveChain: haveChain,
-			Execution: r.Execution.Version, Consensus: r.Consensus.Version,
-			ExecutionConfig: r.Execution.ForkConfig, ExecutionConfigErr: r.Execution.ForkConfigErr,
-			ConsensusConfig: r.Consensus.ForkConfig, ConsensusConfigErr: r.Consensus.ForkConfigErr,
-			Now: now, CriticalWithin: p.forkCriticalIn,
-		})
-		ignore := config.MergeIgnores(p.ignore, r.Ignore)
-		ea := status.AssessAdvisories(advisoryInput(r.Execution.Version, r.Execution.VersionErr, ignore))
-		ca := status.AssessAdvisories(advisoryInput(r.Consensus.Version, r.Consensus.VersionErr, ignore))
-		ignoreCheck, ignoreRan := checkIgnoreList(r.Ignore, []nodeResult{r}, adv, false)
-		a := []layerFindings{
-			{"network", status.AssessNetwork(status.NetworkInput{
-				Expected:    r.Network,
-				ExecutionID: r.Execution.ChainID, ExecutionErr: r.Execution.ChainIDErr, ExecutionSkipped: r.Execution.Unreachable,
-				ConsensusID: r.Consensus.ChainID, ConsensusErr: r.Consensus.ChainIDErr, ConsensusSkipped: r.Consensus.Unreachable,
-			}), r.Execution.Unreachable && r.Consensus.Unreachable},
-			{"execution", status.AssessVersion(ev), false},
-			{"execution sync", status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync), r.Execution.Unreachable},
-			{"consensus", status.AssessVersion(cv), false},
-			{"consensus sync", status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync), r.Consensus.Unreachable},
-			{"fork", fork.Assessment, fork.NotRun},
-			// An empty cell means the client was not assessed.
-			{"execution advisories", ea.Assessment, ea.Cell == ""},
-			{"consensus advisories", ca.Assessment, ca.Cell == ""},
-			// Without entries there is nothing to check, which is not
-			// "could not run".
-			{"ignore_advisories", ignoreCheck, len(r.Ignore) > 0 && !ignoreRan},
+	r := n.r
+	ev := versionInput(r.Execution.Version, r.Execution.VersionErr)
+	cv := versionInput(r.Consensus.Version, r.Consensus.VersionErr)
+	chainID, haveChain := detectedChain(r)
+	fork := status.AssessForks(status.ForkInput{
+		Schedule: p.schedule, ChainID: chainID, HaveChain: haveChain,
+		Execution: r.Execution.Version, Consensus: r.Consensus.Version,
+		ExecutionConfig: r.Execution.ForkConfig, ExecutionConfigErr: r.Execution.ForkConfigErr,
+		ConsensusConfig: r.Consensus.ForkConfig, ConsensusConfigErr: r.Consensus.ForkConfigErr,
+		Now: now, CriticalWithin: p.forkCriticalIn,
+	})
+	ignore := config.MergeIgnores(p.ignore, r.Ignore)
+	ea := status.AssessAdvisories(advisoryInput(r.Execution.Version, r.Execution.VersionErr, ignore))
+	ca := status.AssessAdvisories(advisoryInput(r.Consensus.Version, r.Consensus.VersionErr, ignore))
+	ignoreCheck, ignoreRan := checkIgnoreList(r.Ignore, n.software(), adv, false)
+	a := []layerFindings{
+		{"network", status.AssessNetwork(status.NetworkInput{
+			Expected:    r.Network,
+			ExecutionID: r.Execution.ChainID, ExecutionErr: r.Execution.ChainIDErr, ExecutionSkipped: r.Execution.Unreachable,
+			ConsensusID: r.Consensus.ChainID, ConsensusErr: r.Consensus.ChainIDErr, ConsensusSkipped: r.Consensus.Unreachable,
+		}), r.Execution.Unreachable && r.Consensus.Unreachable},
+		{"execution", status.AssessVersion(ev), false},
+		{"execution sync", status.AssessExecutionSync(status.SyncInput{Skipped: r.Execution.Unreachable, Err: r.Execution.SyncErr}, r.Execution.Sync), r.Execution.Unreachable},
+		{"consensus", status.AssessVersion(cv), false},
+		{"consensus sync", status.AssessConsensusSync(status.SyncInput{Skipped: r.Consensus.Unreachable, Err: r.Consensus.SyncErr}, r.Consensus.Sync), r.Consensus.Unreachable},
+		{"fork", fork.Assessment, fork.NotRun},
+		// An empty cell means the client was not assessed.
+		{"execution advisories", ea.Assessment, ea.Cell == ""},
+		{"consensus advisories", ca.Assessment, ca.Cell == ""},
+		// Without entries there is nothing to check, which is not
+		// "could not run".
+		{"ignore_advisories", ignoreCheck, len(r.Ignore) > 0 && !ignoreRan},
+	}
+	rw := row{
+		cells: []string{
+			formatNetwork(r),
+			formatVersion(r.Execution.Version, r.Execution.VersionErr, ev),
+			formatSync(r.Execution.Unreachable, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
+			formatVersion(r.Consensus.Version, r.Consensus.VersionErr, cv),
+			formatSync(r.Consensus.Unreachable, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
+			fork.Cell,
+			formatAdvisories(ea.Cell, ca.Cell),
+		},
+		findings: a,
+	}
+	for _, c := range []componentCounts{{"execution", ea.Counts}, {"consensus", ca.Counts}} {
+		if c.counts != nil {
+			rw.advisories = append(rw.advisories, c)
 		}
-		rw := row{
-			node: r.Name,
-			cells: [7]string{
-				formatNetwork(r),
-				formatVersion(r.Execution.Version, r.Execution.VersionErr, ev),
-				formatSync(r.Execution.Unreachable, r.Execution.SyncErr, func() string { return formatExecutionSync(r.Execution.Sync) }),
-				formatVersion(r.Consensus.Version, r.Consensus.VersionErr, cv),
-				formatSync(r.Consensus.Unreachable, r.Consensus.SyncErr, func() string { return formatConsensusSync(r.Consensus.Sync) }),
-				fork.Cell,
-				formatAdvisories(ea.Cell, ca.Cell),
-			},
-			findings:   a,
-			advisories: map[string]map[string]int{},
-		}
-		for comp, counts := range map[string]map[string]int{"execution": ea.Counts, "consensus": ca.Counts} {
-			if counts != nil {
-				rw.advisories[comp] = counts
+	}
+	if haveChain && p.schedule != nil {
+		if net, ok := p.schedule.ForChainID(chainID); ok {
+			if f, ok := net.Next(now); ok {
+				rw.nextForks = []nextFork{{network: net.Name, fork: f.Name, at: f.Time}}
 			}
 		}
-		for _, x := range a {
-			rw.level = max(rw.level, x.Level)
-		}
-		overall = max(overall, rw.level)
-		rows = append(rows, rw)
 	}
-	return rows, overall
+	return rw
 }
 
 // notifyChanges sends a Telegram message about the nodes whose status
@@ -393,28 +435,27 @@ func notifyChanges(ctx context.Context, tg *notify.Telegram, cfg *config.Telegra
 }
 
 // checkIgnoreList reports entries of an ignore list that are not
-// advisories of any client of nodes, so typos show up; global marks the
-// global list. It does not run (ran is false) if a client could not be
-// identified or its advisories are unknown: the ID might belong to that
-// client.
-func checkIgnoreList(entries []config.AdvisoryIgnore, nodes []nodeResult, adv map[releases.Repo]advisoryData, global bool) (a status.Assessment, ran bool) {
+// advisories of any of the software sw, so typos show up; global marks the
+// global list. It does not run (ran is false) if a piece of software could
+// not be identified or its advisories are unknown: the ID might belong to
+// it.
+func checkIgnoreList(entries []config.AdvisoryIgnore, sw []software, adv map[releases.Repo]advisoryData, global bool) (a status.Assessment, ran bool) {
 	if len(entries) == 0 {
 		return status.Assessment{}, true
 	}
 	var lists [][]releases.Advisory
 	var seen []releases.Repo
 	var names []string
-	for _, r := range nodes {
-		for _, v := range []ethereum.ClientVersion{r.Execution.Version, r.Consensus.Version} {
-			repo, ok := releases.RepoFor(v.Client)
-			if !ok || adv[repo].result == nil {
-				return status.Assessment{}, false
-			}
-			if !slices.Contains(seen, repo) {
-				seen = append(seen, repo)
-				lists = append(lists, adv[repo].result.Advisories)
-				names = append(names, v.Client.String())
-			}
+	for _, s := range sw {
+		v := s.version
+		repo, ok := releases.RepoFor(v.Client)
+		if !ok || adv[repo].result == nil {
+			return status.Assessment{}, false
+		}
+		if !slices.Contains(seen, repo) {
+			seen = append(seen, repo)
+			lists = append(lists, adv[repo].result.Advisories)
+			names = append(names, v.Client.String())
 		}
 	}
 	slices.Sort(names)
@@ -474,30 +515,30 @@ func paint(s string, l status.Level, color bool) string {
 	return colorFor(l) + s + colorReset
 }
 
-// printReport writes the table, the findings and a summary line. global
+// printReport writes the tables, the findings and a summary line. global
 // holds findings that concern the run, not a single node.
 func printReport(w io.Writer, rows []row, global []status.Finding, overall status.Level, color bool) error {
-	// tabwriter aligns tab-separated columns. Arguments: minwidth, tabwidth,
-	// padding, padchar, flags.
-	var table bytes.Buffer
-	tw := tabwriter.NewWriter(&table, 0, 8, 2, ' ', 0)
-	fmt.Fprintln(tw, "STATUS\tNODE\tNETWORK\tEXECUTION\tEL SYNC\tCONSENSUS\tCL SYNC\tFORK\tADVISORIES")
+	// One table per node type, in the order the types first appear in
+	// the config.
+	var types []string
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.level, r.node, strings.Join(r.cells[:], "\t"))
+		if !slices.Contains(types, r.typ) {
+			types = append(types, r.typ)
+		}
 	}
-	if err := tw.Flush(); err != nil {
-		return err
-	}
-
-	// Colors are added after alignment: escape codes have no visible width,
-	// but tabwriter would count them and misalign the columns. The status
-	// word is at the start of each row, so it can be colored afterwards.
-	lines := strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n")
-	fmt.Fprintln(w, lines[0])
-	for i, line := range lines[1:] {
-		l := rows[i].level
-		word := l.String()
-		fmt.Fprintln(w, paint(word, l, color)+strings.TrimPrefix(line, word))
+	for i, typ := range types {
+		if i > 0 {
+			fmt.Fprintln(w)
+		}
+		var group []row
+		for _, r := range rows {
+			if r.typ == typ {
+				group = append(group, r)
+			}
+		}
+		if err := printTable(w, group, color); err != nil {
+			return err
+		}
 	}
 
 	var findings []string
@@ -525,6 +566,33 @@ func printReport(w io.Writer, rows []row, global []status.Finding, overall statu
 
 	fmt.Fprintf(w, "\nStatus: %s (%d OK, %d WARN, %d CRIT)\n",
 		paint(overall.String(), overall, color), counts[status.OK], counts[status.Warn], counts[status.Crit])
+	return nil
+}
+
+// printTable writes the table of rows, which are all of one node type.
+func printTable(w io.Writer, rows []row, color bool) error {
+	// tabwriter aligns tab-separated columns. Arguments: minwidth, tabwidth,
+	// padding, padchar, flags.
+	var table bytes.Buffer
+	tw := tabwriter.NewWriter(&table, 0, 8, 2, ' ', 0)
+	fmt.Fprintln(tw, "STATUS\tNODE\t"+strings.Join(rows[0].columns, "\t"))
+	for _, r := range rows {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", r.level, r.node, strings.Join(r.cells, "\t"))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+
+	// Colors are added after alignment: escape codes have no visible width,
+	// but tabwriter would count them and misalign the columns. The status
+	// word is at the start of each row, so it can be colored afterwards.
+	lines := strings.Split(strings.TrimSuffix(table.String(), "\n"), "\n")
+	fmt.Fprintln(w, lines[0])
+	for i, line := range lines[1:] {
+		l := rows[i].level
+		word := l.String()
+		fmt.Fprintln(w, paint(word, l, color)+strings.TrimPrefix(line, word))
+	}
 	return nil
 }
 

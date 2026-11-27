@@ -195,7 +195,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		return exitOK
 	}
 
-	results := checkNodes(ctx, e.client, cfg.Nodes, *timeout)
+	nodes := make([]checker, len(cfg.Nodes))
+	for i, n := range cfg.Nodes {
+		nodes[i] = newChecker(n, e.client)
+	}
+	queryAll(ctx, nodes, *timeout)
 
 	src := &releases.Source{
 		BaseURL:  e.githubBaseURL,
@@ -206,13 +210,13 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		// GitHub asks API clients to send a User-Agent naming the tool.
 		UserAgent: "x3f/" + buildVersion(),
 	}
-	rel := fetchReleases(ctx, src, results, *timeout)
-	refreshIfAhead(ctx, src, results, rel, *timeout)
-	adv := fetchAdvisories(ctx, src, results, *timeout)
+	rel := fetchReleases(ctx, src, nodes, *timeout)
+	refreshIfAhead(ctx, src, nodes, rel, *timeout)
+	adv := fetchAdvisories(ctx, src, nodes, *timeout)
 
 	day := 24 * time.Hour
 	now := e.now()
-	rows, overall := assess(results, rel, adv, assessParams{
+	rows, overall := assessAll(nodes, upstream{rel: rel, adv: adv}, assessParams{
 		now:            now,
 		grace:          time.Duration(*graceDays) * day,
 		schedule:       schedule,
@@ -223,8 +227,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	if f, ok := status.ForkDataNote(schedule, now); ok {
 		global = append(global, f)
 	}
-	// Global entries are checked against the clients of all nodes.
-	globalIgnore, _ := checkIgnoreList(cfg.IgnoreAdvisories, results, adv, true)
+	// Global entries are checked against the software of all nodes.
+	globalIgnore, _ := checkIgnoreList(cfg.IgnoreAdvisories, allSoftware(nodes), adv, true)
 	for _, f := range globalIgnore.Findings {
 		f.Message = "ignore_advisories: " + f.Message
 		global = append(global, f)
@@ -238,7 +242,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 		global = append(global, nf...)
 	}
 	if *metricsFile != "" {
-		data := metrics.Render(buildMetrics(results, rows, rel, schedule, success, e.now()))
+		data := metrics.Render(buildMetrics(nodes, rows, rel, success, e.now()))
 		if err := metrics.WriteFile(*metricsFile, data); err != nil {
 			global = append(global, status.Finding{Level: status.Warn, Message: err.Error()})
 		}

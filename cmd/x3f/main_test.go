@@ -503,6 +503,40 @@ func TestHelpDocumentsExitCodesAndEnvironment(t *testing.T) {
 	}
 }
 
+// Each node type gets its own table with its own columns, in the order the
+// types first appear; the findings and the summary cover all nodes. The
+// second type is made up, since ethereum is the only one so far.
+func TestPrintReportOneTablePerType(t *testing.T) {
+	ethCols := []string{"NETWORK", "EXECUTION"}
+	otherCols := []string{"VERSION"}
+	warn := status.Assessment{Level: status.Warn, Findings: []status.Finding{{Level: status.Warn, Message: "behind"}}}
+	rows := []row{
+		{node: "eth-1", typ: "ethereum", columns: ethCols, cells: []string{"mainnet", "Geth 1.17.10"}},
+		{node: "x-1", typ: "other", columns: otherCols, level: status.Warn, cells: []string{"6.0.0"},
+			findings: []layerFindings{{name: "version", Assessment: warn}}},
+		{node: "eth-2", typ: "ethereum", columns: ethCols, cells: []string{"hoodi", "Reth 2.11.0"}},
+	}
+	var out bytes.Buffer
+	if err := printReport(&out, rows, nil, status.Warn, false); err != nil {
+		t.Fatal(err)
+	}
+	want := `STATUS  NODE   NETWORK  EXECUTION
+OK      eth-1  mainnet  Geth 1.17.10
+OK      eth-2  hoodi    Reth 2.11.0
+
+STATUS  NODE  VERSION
+WARN    x-1   6.0.0
+
+Findings:
+  WARN  x-1 version: behind
+
+Status: WARN (2 OK, 1 WARN, 0 CRIT)
+`
+	if got := out.String(); got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
 // Colors must not change the layout: without escape codes the colored
 // output is identical to the plain one.
 func TestColorKeepsAlignment(t *testing.T) {

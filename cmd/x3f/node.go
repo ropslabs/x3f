@@ -1,0 +1,86 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"time"
+
+	"github.com/ropslabs/x3f/internal/config"
+	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/releases"
+)
+
+// checker checks one configured node. Every node type implements it, and
+// newChecker picks the implementation for the type in the config. Types are
+// compiled in, not loaded as plugins. The run loop, the report, the
+// notifications and the metrics only use this interface, so a new type
+// does not change them.
+//
+// An interface in Go is a set of methods; any type that has these methods
+// satisfies it, without declaring so.
+type checker interface {
+	// name is the node name from the config.
+	name() string
+	// typ is the node type from the config, e.g. "ethereum".
+	typ() string
+	// columns are the table headings after STATUS and NODE. They are the
+	// same for every node of a type; each row has one cell per column.
+	columns() []string
+	// query asks the node for everything the checks need. It is called
+	// once, concurrently with the other nodes.
+	query(ctx context.Context, timeout time.Duration)
+	// software lists what query found on the node, in a fixed order.
+	// Releases and advisories are fetched for it.
+	software() []software
+	// assess evaluates the result of query.
+	assess(up upstream, p assessParams) row
+}
+
+// software is one piece of software on a node, e.g. its execution client.
+type software struct {
+	// component is its role on the node, e.g. "execution". It is used as
+	// a metric label.
+	component string
+	// version is what the node reported. Its Client is Unknown if the
+	// software was not recognized or could not be queried.
+	version ethereum.ClientVersion
+}
+
+// upstream holds the data fetched from the software's repositories.
+type upstream struct {
+	rel map[releases.Repo]releaseData
+	adv map[releases.Repo]advisoryData
+}
+
+// newChecker returns the checker for a node. config.Validate has already
+// rejected unknown types.
+func newChecker(n config.Node, client *ethereum.Client) checker {
+	switch n.Type {
+	case config.TypeEthereum:
+		return &ethereumNode{cfg: n, client: client}
+	}
+	// Unreachable after validation; a panic shows a missing case at once.
+	panic(fmt.Sprintf("node %q: no checker for type %q", n.Name, n.Type))
+}
+
+// queryAll queries all nodes concurrently.
+func queryAll(ctx context.Context, nodes []checker, timeout time.Duration) {
+	// A WaitGroup waits for a set of goroutines to finish. wg.Go starts f
+	// in a new goroutine and tracks it; wg.Wait blocks until all are done.
+	var wg sync.WaitGroup
+	for _, n := range nodes {
+		// Each checker writes only to itself, so no mutex is needed.
+		wg.Go(func() { n.query(ctx, timeout) })
+	}
+	wg.Wait()
+}
+
+// allSoftware returns the software of all nodes, node by node.
+func allSoftware(nodes []checker) []software {
+	var all []software
+	for _, n := range nodes {
+		all = append(all, n.software()...)
+	}
+	return all
+}
