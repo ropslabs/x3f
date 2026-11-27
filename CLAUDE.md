@@ -8,7 +8,9 @@ Guidance for Claude when working in this repository.
 
 Solo open-source project, built in spare time. The maintainer is a DevOps engineer.
 
-## Current scope: version 1 = Ethereum node module
+## Current scope: version 1 = Ethereum node module (paused)
+
+**Paused since 2026-11-27.** A validation with Ethereum solo stakers showed that update notifications are no real pain for them; for Aztec node operators they are (operator survey). Work continues with the Aztec module (roadmap item 1). The Ethereum checks stay as they are and are reused for the L1 connection of Aztec nodes; `forks.yaml` is no longer maintained (state of 2026-11-27, known gap: Hoodi Glamsterdam, see README). No further Ethereum releases are planned.
 
 Goal: for each configured node, report whether its clients are up to date, whether a known security advisory affects them, and whether they are ready for the next hard fork.
 
@@ -73,10 +75,12 @@ scripts/              release build (build-release.sh)
 
 - Pushing a tag `vX.Y.Z` runs `.github/workflows/release.yml`: checks, `scripts/build-release.sh` (6 targets, archives, `SHA256SUMS`), GitHub artifact attestations, GitHub release. Tags with a hyphen (`v0.2.0-rc.1`) become pre-releases.
 - Release notes: `docs/releases/vX.Y.Z.md` (also used for its release candidates), written for x3f users, with upgrade notes and known limitations; GitHub's generated notes follow. Bump `VERSION=` in the README install section only right before the final tag, not for a release candidate.
-- Before tagging: CI green on main, `forks.yaml` checked against the official sources (see below).
+- Before tagging: CI green on main. (`forks.yaml` is no longer checked before a tag while the Ethereum module is paused.)
 - Actions are pinned to commit SHAs; update them together with the version comment.
 
 ## Updating forks.yaml
+
+Paused with the Ethereum module; the rules below apply if it is resumed.
 
 - Data only from official sources (EF blog, ethereum/pm, specs); read the original page text, not a summary. Add the source to the fork entry and to `internal/forks/SOURCES.md`.
 - The loader checks `timestamp = genesis_time + epoch × 384`; a failure is almost always a typo.
@@ -106,9 +110,10 @@ While working on steps 5–7: where it costs no extra effort, do not hard-wire l
 
 ## Roadmap after version 1
 
-Recorded for later; not part of v1, do not implement yet.
+Recorded for later; do not implement before the plan for an item is agreed.
 
-1. **Damping against flapping**, directly after version 1: report a status change only after it persisted for two runs, for every status change, not only "unreachable". A single timeout must not cause two messages, and neither must a load balancer: in the v0.2.0-rc.1 test, public endpoints (publicnode.com) answered from different backends from run to run (Reth 2.11.0, then Geth 1.17.9), so the node switched between WARN and CRIT and every run sent a message.
-2. **General component model.** A component has a type, a version source, an upstream repository and a health check. Execution and consensus clients become the first types: compiled-in implementations of one shared interface, not Go's `plugin` package.
-3. **Local web UI** on top of that model: `x3f serve`, embedded in the binary, listening on localhost by default, read-only.
-4. **New component types:** validator client, MEV-Boost, later L2 nodes and indexers.
+1. **Aztec module, together with the general component model.** A component has a type, a version source, an upstream repository and a health check, as compiled-in implementations of one shared interface, not Go's `plugin` package. An Aztec node is a single component with an L1 dependency (Ethereum); the existing Ethereum checks are reused there as the check of the node's L1 connection. Aztec is the test of whether the model is really general and not shaped by the execution/consensus pair. Research: `docs/research/aztec.md` (node API, L1 contracts, releases, live results of 2026-11-27, open points).
+2. **Damping against flapping:** report a status change only after it persisted for two runs, for every status change, not only "unreachable". A single timeout must not cause two messages, and neither must a load balancer: in the v0.2.0-rc.1 test, public endpoints (publicnode.com) answered from different backends from run to run (Reth 2.11.0, then Geth 1.17.9), so the node switched between WARN and CRIT and every run sent a message.
+3. **Local web UI** on top of the component model: `x3f serve`, embedded in the binary, listening on localhost by default, read-only.
+
+Paused with the Ethereum module: validator client and MEV-Boost as new Ethereum component types, the forkId check, `forks.yaml` updates.

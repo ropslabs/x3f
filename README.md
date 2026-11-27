@@ -6,6 +6,8 @@ x3f tells you what is running where, in which version, who owns it, and what nee
 
 > **Status:** early stage (v0.x). The Ethereum node check below works today, including known security advisories of the clients, Telegram notifications on status changes and Prometheus metrics; inventory is planned. Flags and output may still change between 0.x releases.
 >
+> **The Ethereum module is paused.** Development continues with a module for [Aztec](https://aztec.network) nodes. The Ethereum checks keep working, but the built-in fork data is not maintained after 2026-11-27; see [Fork readiness](#fork-readiness) for the known gap on Hoodi.
+>
 > *An n-day is a known vulnerability that already has a fix. Many attacks don't need a zero-day, just a system where the existing patch was never applied. x3f finds those systems.*
 
 ---
@@ -174,6 +176,20 @@ The fork schedule is built into the binary ([`internal/forks/forks.yaml`](intern
 For fork readiness x3f asks the node itself: the execution client via `eth_config` ([EIP-7910](https://eips.ethereum.org/EIPS/eip-7910)), the consensus client via `GET /eth/v1/config/spec` (fork epochs and `BLOB_SCHEDULE`). The answer is compared with the fork schedule. If a client does not answer (older releases, proxies that block the method), x3f falls back to comparing the client version with the announced releases and adds a note. If the execution and consensus client are on different networks, the fork check is skipped.
 
 Point x3f directly at each node, not at a proxy or load balancer: behind one, every request may be answered by a different node, so version, sync status and fork schedule would not describe the same machine. Versions that look like a proxy (newer than every known release) are reported in yellow as a safety net.
+
+**The fork data is not maintained after 2026-11-27.** It was last checked against the official sources on that day and will not follow later announcements. Known gap: [ACDC #192](https://github.com/ethereum/pm/issues/2305) rescheduled **Hoodi Glamsterdam** on 2026-11-26 to epoch 143616 (2026-12-15 19:12 UTC), but the built-in data still lists it as postponed. A Hoodi node that schedules the new date is reported as "schedules unknown fork": yellow, red from 2026-12-01 19:12 UTC (14 days before the fork). To check Hoodi nodes correctly, copy [`internal/forks/forks.yaml`](internal/forks/forks.yaml), replace its last entry (Hoodi Glamsterdam with `status: postponed`) with the following and pass the copy with `-forks`:
+
+```yaml
+      - name: Glamsterdam
+        execution: Amsterdam
+        consensus: Gloas
+        epoch: 143616
+        timestamp: 1797361944
+        sources:
+          - https://github.com/ethereum/pm/issues/2305
+```
+
+The entry lists no client releases, so a node that does not schedule the fork yet stays yellow ("waiting for client release") instead of turning red.
 
 ### Security advisories
 
