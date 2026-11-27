@@ -73,15 +73,20 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
-// Call sends a JSON-RPC 2.0 request for method without parameters and
-// decodes the result into result.
-func (c *Client) Call(ctx context.Context, endpoint, method string, result any) error {
+// Call sends a JSON-RPC 2.0 request for method with the given parameters
+// (none: an empty list) and decodes the result into result. params is
+// variadic ("...any"): callers without parameters simply leave it out.
+func (c *Client) Call(ctx context.Context, endpoint, method string, result any, params ...any) error {
 	u, err := parseEndpoint(endpoint)
 	if err != nil {
 		return err
 	}
 
-	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: 1, Method: method, Params: []any{}})
+	if params == nil {
+		// JSON-RPC wants a list; a nil slice would be encoded as null.
+		params = []any{}
+	}
+	body, err := json.Marshal(rpcRequest{JSONRPC: "2.0", ID: 1, Method: method, Params: params})
 	if err != nil {
 		return err
 	}

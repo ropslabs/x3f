@@ -2,10 +2,12 @@ package httpjson
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -57,5 +59,33 @@ func TestCallErrors(t *testing.T) {
 				t.Errorf("%v must not be a transport error", err)
 			}
 		})
+	}
+}
+
+// TestCallParams checks the request body: an empty list without
+// parameters (not null), and the parameters in order otherwise.
+func TestCallParams(t *testing.T) {
+	var got []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Params json.RawMessage `json:"params"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+		got = append(got, string(req.Params))
+		w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":"0x1"}`))
+	}))
+	defer srv.Close()
+	c := NewClient(nil)
+	var out string
+	if err := c.Call(context.Background(), srv.URL, "eth_chainId", &out); err != nil {
+		t.Fatal(err)
+	}
+	call := map[string]string{"to": "0x35b22e09ee0390539439e24f06da43d83f90e298", "data": "0x01"}
+	if err := c.Call(context.Background(), srv.URL, "eth_call", &out, call, "latest"); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`[]`, `[{"data":"0x01","to":"0x35b22e09ee0390539439e24f06da43d83f90e298"},"latest"]`}
+	if !slices.Equal(got, want) {
+		t.Errorf("params %q, want %q", got, want)
 	}
 }
