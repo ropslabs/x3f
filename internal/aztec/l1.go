@@ -211,6 +211,24 @@ func revertData(err error) (string, bool) {
 // arguments, and returns the first words 32-byte words of the result, each
 // as 64 lowercase hex digits.
 func (c *Client) call(ctx context.Context, endpoint, to, selector string, words int, args ...uint64) ([]string, error) {
+	b, err := c.callRaw(ctx, endpoint, to, selector, args...)
+	if err != nil {
+		return nil, err
+	}
+	if len(b) < 32*words {
+		return nil, fmt.Errorf("result has %d bytes, want %d", len(b), 32*words)
+	}
+	out := make([]string, words)
+	for i := range out {
+		out[i] = hex.EncodeToString(b[32*i : 32*(i+1)])
+	}
+	return out, nil
+}
+
+// callRaw sends an eth_call to the contract at to, with unsigned numbers as
+// arguments, and returns the result bytes. An empty result is an error: it
+// is what an address without code returns.
+func (c *Client) callRaw(ctx context.Context, endpoint, to, selector string, args ...uint64) ([]byte, error) {
 	if !addressRe.MatchString(to) {
 		return nil, fmt.Errorf("invalid contract address %q", to)
 	}
@@ -228,14 +246,7 @@ func (c *Client) call(ctx context.Context, endpoint, to, selector string, words 
 	case !strings.HasPrefix(raw, "0x") || err != nil:
 		return nil, errors.New("result is not hex")
 	case len(b) == 0:
-		// eth_call to an address without code returns "0x".
 		return nil, errors.New("empty result: no contract at this address?")
-	case len(b) < 32*words:
-		return nil, fmt.Errorf("result has %d bytes, want %d", len(b), 32*words)
 	}
-	out := make([]string, words)
-	for i := range out {
-		out[i] = hex.EncodeToString(b[32*i : 32*(i+1)])
-	}
-	return out, nil
+	return b, nil
 }

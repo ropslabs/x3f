@@ -16,7 +16,7 @@ import (
 	"github.com/ropslabs/x3f/internal/software"
 )
 
-func readFixture(t *testing.T, name string) []byte {
+func readFixture(t testing.TB, name string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("testdata", name))
 	if err != nil {

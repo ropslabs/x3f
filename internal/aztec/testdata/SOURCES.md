@@ -65,6 +65,30 @@ aztec-packages v6.0.0 (commit 0219f11d81),
 `l1-contracts/src/core/interfaces/IRollup.sol` (with `IHaveVersion`),
 `core/interfaces/IValidatorSelection.sol` and `core/libraries/Errors.sol`.
 
+## live/l1/governance/*.json — recorded
+
+Governance answers, recorded on 2026-11-27 at 14:10 UTC from the same
+publicnode.com endpoints and in the same way (response bodies unchanged,
+no headers). Governance addresses from the recorded getNodeInfo answers
+(`0x1102…575e` mainnet, `0xcaf7…329f` Sepolia).
+
+| File | Request |
+|---|---|
+| `web3_sha3-{proposalCount,getProposalState,getProposal,getActions,getURI,addRollup}-publicnode-mainnet.json` | `web3_sha3` of `proposalCount()`, `getProposalState(uint256)`, `getProposal(uint256)`, `getActions()`, `getURI()`, `addRollup(address)` |
+| `eth_call-proposalCount-publicnode-{mainnet,sepolia}.json` | 7 proposals on mainnet, 9 on Sepolia |
+| `eth_call-getProposalState-<id>-publicnode-*.json` | every proposal: all executed, except Sepolia #0 (rejected) |
+| `eth_call-getProposal-<id>-publicnode-*.json` | mainnet #5 (`V6UpgradePayload`, registers the v6 rollup), #6 (`ZeroRegistryRewardsPayload`, no new rollup), #1; Sepolia #8 (`V6UpgradePayload`) |
+| `eth_call-getActions-<id>-publicnode-*.json`, `eth_call-getURI-<id>-publicnode-*.json` | the payloads of those proposals; `getActions` of mainnet #1 reverts (custom error `0xe7a31ae1`) |
+
+The timings in `getProposal` are mainnet: voting delay 3 days, voting 7
+days, execution delay 2 days, grace period 7 days (#1: 7-day execution
+delay); Sepolia #8: 2 minutes, 6 minutes, 2 minutes, 1 day. Struct layout
+and state logic: `IGovernance.sol` (`Proposal`, `ProposalConfiguration`,
+`ProposalState`), `Governance.sol` (`getProposalState`) and
+`ProposalLib.sol` (`pendingThrough` … `executableThrough`) in aztec-packages
+v6.0.0; `Registry.addRollup` makes the new rollup canonical
+(`Registry.sol`).
+
 ## networks/network_config.json — recorded, trimmed
 
 `network_config.json` of
