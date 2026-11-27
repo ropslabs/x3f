@@ -44,6 +44,18 @@ aztec-packages v6.0.0 (commit 0219f11d81),
 `l1-contracts/src/governance/interfaces/IRegistry.sol` and
 `l1-contracts/src/core/interfaces/IRollup.sol` (via `IHaveVersion`).
 
+## networks/network_config.json — recorded, trimmed
+
+`network_config.json` of
+[AztecProtocol/networks](https://github.com/AztecProtocol/networks/blob/7182c14bbb32f5af995e06edcec0690633acae4a/network_config.json)
+at commit 7182c14b (main on 2026-11-27; the file last changed on
+2026-05-28). The Aztec node loads this file for `--network`
+(`yarn-project/cli/src/config/network_config.ts` in aztec-labs-eng/aztec-node
+at commit 1b6de149f4). **Trimmed:** each network keeps only `l1ChainId` and
+`registryAddress`, the fields x3f uses; bootnodes, snapshot and file store
+URLs were removed. The docs page `docs/docs/networks.md` of aztec-packages
+lists the same registry addresses.
+
 ## method-not-found.json — derived
 
 The answer of an Aztec node to a JSON-RPC method it does not serve, built

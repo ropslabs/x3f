@@ -18,6 +18,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/ropslabs/x3f/internal/aztec"
 	"github.com/ropslabs/x3f/internal/network"
 )
 
@@ -163,7 +164,7 @@ var Types = []string{TypeEthereum, TypeAztec}
 // unnoticed and can get a meaning later without changing old configs.
 var typeFields = map[string][]string{
 	TypeEthereum: {"execution_url", "beacon_url", "network"},
-	TypeAztec:    {"url", "l1", "l1_url"},
+	TypeAztec:    {"url", "l1", "l1_url", "network"},
 }
 
 // Node is one configured node. It is queried read-only. Which fields it
@@ -190,9 +191,10 @@ type Node struct {
 	// node whose L1 is not in the config. x3f only reads contracts
 	// through it and does not check it as an Ethereum node.
 	L1URL string `yaml:"l1_url,omitempty"`
-	// Network is optional (type ethereum): if set ("mainnet", "sepolia",
-	// "hoodi", any capitalisation), x3f reports it as critical when the
-	// node is on a different network. Validate normalizes it to lowercase.
+	// Network is optional: if set, x3f reports it as critical when the
+	// node is on a different network. The names depend on the type:
+	// "mainnet", "sepolia" or "hoodi" for Ethereum, "mainnet" or "testnet"
+	// for Aztec. Validate normalizes it to lowercase.
 	Network string `yaml:"network,omitempty"`
 	// IgnoreAdvisories applies to this node in addition to the global
 	// list.
@@ -317,24 +319,30 @@ func validateTyped(n *Node, label string, typeOf map[string]string) []error {
 		if err := validateURL(n.BeaconURL); err != nil {
 			errs = append(errs, fmt.Errorf("%s: beacon_url: %w", label, err))
 		}
-		if n.Network != "" {
-			// Accept any capitalisation ("Mainnet") and store the
-			// canonical lowercase name.
-			normalized := strings.ToLower(strings.TrimSpace(n.Network))
-			if _, ok := network.ByName(normalized); !ok {
-				errs = append(errs, fmt.Errorf("%s: network %q is not one of %s",
-					label, n.Network, strings.Join(network.Names(), ", ")))
-			} else {
-				n.Network = normalized
-			}
-		}
+		errs = append(errs, validateNetwork(n, label, network.Names())...)
 	case TypeAztec:
 		if err := validateURL(n.URL); err != nil {
 			errs = append(errs, fmt.Errorf("%s: url: %w", label, err))
 		}
 		errs = append(errs, validateL1(n, label, typeOf)...)
+		errs = append(errs, validateNetwork(n, label, aztec.NetworkNames())...)
 	}
 	return errs
+}
+
+// validateNetwork checks the optional network of n against the network
+// names of its type. It accepts any capitalisation ("Mainnet") and stores
+// the lowercase name.
+func validateNetwork(n *Node, label string, names []string) []error {
+	if n.Network == "" {
+		return nil
+	}
+	normalized := strings.ToLower(strings.TrimSpace(n.Network))
+	if !slices.Contains(names, normalized) {
+		return []error{fmt.Errorf("%s: network %q is not one of %s", label, n.Network, strings.Join(names, ", "))}
+	}
+	n.Network = normalized
+	return nil
 }
 
 // setFields returns the type-specific fields that are set on n.

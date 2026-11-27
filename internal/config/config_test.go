@@ -503,10 +503,9 @@ func TestAztecNode(t *testing.T) {
 		{
 			name: "Ethereum fields on an Aztec node",
 			node: "    type: aztec\n    url: http://localhost:8080\n    l1: eth\n" +
-				"    execution_url: http://localhost:8545\n    beacon_url: http://localhost:5052\n    network: mainnet\n",
+				"    execution_url: http://localhost:8545\n    beacon_url: http://localhost:5052\n",
 			wantErr: `node "az": execution_url is not used by type aztec` + "\n" +
-				`node "az": beacon_url is not used by type aztec` + "\n" +
-				`node "az": network is not used by type aztec`,
+				`node "az": beacon_url is not used by type aztec`,
 		},
 		{
 			name: "Aztec fields on an Ethereum node",
@@ -536,6 +535,40 @@ func TestAztecNode(t *testing.T) {
 			az := cfg.Nodes[1]
 			if az.Type != TypeAztec || az.L1 != tt.wantL1 || az.L1URL != tt.wantL1URL {
 				t.Errorf("type %q, l1 %q, l1_url %q; want aztec, %q, %q", az.Type, az.L1, az.L1URL, tt.wantL1, tt.wantL1URL)
+			}
+		})
+	}
+}
+
+func TestNetworkPerType(t *testing.T) {
+	const eth = "  - name: eth\n    execution_url: http://localhost:8545\n    beacon_url: http://localhost:5052\n"
+	const az = "  - name: az\n    type: aztec\n    url: http://localhost:8080\n    l1: eth\n"
+	tests := []struct {
+		name, yaml string
+		want       string // normalized network of the last node; "" with wantErr
+		wantErr    string
+	}{
+		{"Aztec mainnet", eth + az + "    network: mainnet\n", "mainnet", ""},
+		{"Aztec testnet, capitalized", eth + az + "    network: \" Testnet \"\n", "testnet", ""},
+		{"Ethereum name on an Aztec node", eth + az + "    network: sepolia\n", "",
+			`node "az": network "sepolia" is not one of mainnet, testnet`},
+		{"Aztec name on an Ethereum node", az + eth + "    network: testnet\n", "",
+			`node "eth": network "testnet" is not one of mainnet, sepolia, hoodi`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := Parse([]byte("nodes:\n" + tt.yaml))
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Errorf("error = %v, want %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Nodes[len(cfg.Nodes)-1].Network; got != tt.want {
+				t.Errorf("network = %q, want %q", got, tt.want)
 			}
 		})
 	}

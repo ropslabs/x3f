@@ -1,0 +1,10 @@
+{
+  "testnet": {
+    "l1ChainId": 11155111,
+    "registryAddress": "0xa0bfb1b494fb49041e5c6e8c2c1be09cd171c6ba"
+  },
+  "mainnet": {
+    "l1ChainId": 1,
+    "registryAddress": "0x35b22e09Ee0390539439E24f06Da43D83f90e298"
+  }
+}
