@@ -69,8 +69,9 @@ type rpcResponse struct {
 }
 
 type rpcError struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
 }
 
 // Call sends a JSON-RPC 2.0 request for method with the given parameters
@@ -106,9 +107,13 @@ func (c *Client) Call(ctx context.Context, endpoint, method string, result any, 
 		return err
 	}
 	if resp.Error != nil {
+		// Data is kept only if it is a JSON string, such as the revert
+		// data of eth_call ("0x..."); it is never part of the message.
+		var data string
+		json.Unmarshal(resp.Error.Data, &data)
 		// The message comes from the server; redact it in case the server
 		// echoes the request URL.
-		return &RPCError{Code: resp.Error.Code,
+		return &RPCError{Code: resp.Error.Code, Data: data,
 			msg: redact(fmt.Errorf("JSON-RPC error %d: %s", resp.Error.Code, resp.Error.Message), u).Error()}
 	}
 	if status != http.StatusOK {
@@ -186,6 +191,9 @@ func statusError(code int) error {
 // like every error of this package.
 type RPCError struct {
 	Code int
+	// Data is the error's "data" if it is a string, e.g. the revert data
+	// of an eth_call; "" otherwise. It is not part of Error().
+	Data string
 	msg  string
 }
 

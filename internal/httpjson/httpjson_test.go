@@ -3,6 +3,7 @@ package httpjson
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -87,5 +88,35 @@ func TestCallParams(t *testing.T) {
 	want := []string{`[]`, `[{"data":"0x01","to":"0x35b22e09ee0390539439e24f06da43d83f90e298"},"latest"]`}
 	if !slices.Equal(got, want) {
 		t.Errorf("params %q, want %q", got, want)
+	}
+}
+
+// TestRPCErrorData checks that the data of a JSON-RPC error is kept when it
+// is a string (the revert data of eth_call), and never printed.
+func TestRPCErrorData(t *testing.T) {
+	tests := []struct {
+		body, want string
+	}{
+		// Recorded revert of getCheckpoint (internal/aztec/testdata/live/l1).
+		{`{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted","data":"0x8711786b"}}`, "0x8711786b"},
+		{`{"jsonrpc":"2.0","id":1,"error":{"code":3,"message":"execution reverted","data":{"reason":"x"}}}`, ""},
+		{`{"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found"}}`, ""},
+	}
+	for _, tt := range tests {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(tt.body)) }))
+		var out string
+		err := NewClient(nil).Call(context.Background(), srv.URL, "eth_call", &out)
+		srv.Close()
+		var re *RPCError
+		if !errors.As(err, &re) {
+			t.Errorf("body %s: error %v is no RPCError", tt.body, err)
+			continue
+		}
+		if re.Data != tt.want {
+			t.Errorf("body %s: data %q, want %q", tt.body, re.Data, tt.want)
+		}
+		if err != nil && strings.Contains(err.Error(), "8711786b") {
+			t.Errorf("message contains the data: %v", err)
+		}
 	}
 }

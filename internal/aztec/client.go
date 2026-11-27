@@ -53,16 +53,21 @@ type L1Contracts struct {
 // methodNotFound is the JSON-RPC 2.0 error code for an unknown method.
 const methodNotFound = -32601
 
-// NodeInfo calls getNodeInfo. Aztec nodes serve their API as aztec_* since
-// v5 and as node_* before (and still, for compatibility, in v5 and v6); if
-// the node does not know aztec_getNodeInfo, node_getNodeInfo is tried.
+// callNode calls a method of the node API. Aztec nodes serve it as aztec_*
+// since v5 and as node_* before (and still, for compatibility, in v5 and
+// v6); if the node does not know the aztec_ method, the node_ one is tried.
+func (c *Client) callNode(ctx context.Context, endpoint, method string, out any) error {
+	err := c.json.Call(ctx, endpoint, "aztec_"+method, out)
+	if code, ok := httpjson.RPCErrorCode(err); ok && code == methodNotFound {
+		err = c.json.Call(ctx, endpoint, "node_"+method, out)
+	}
+	return err
+}
+
+// NodeInfo calls getNodeInfo.
 func (c *Client) NodeInfo(ctx context.Context, endpoint string) (NodeInfo, error) {
 	var info NodeInfo
-	err := c.json.Call(ctx, endpoint, "aztec_getNodeInfo", &info)
-	if code, ok := httpjson.RPCErrorCode(err); ok && code == methodNotFound {
-		err = c.json.Call(ctx, endpoint, "node_getNodeInfo", &info)
-	}
-	if err != nil {
+	if err := c.callNode(ctx, endpoint, "getNodeInfo", &info); err != nil {
 		return NodeInfo{}, fmt.Errorf("getNodeInfo: %w", err)
 	}
 	if info.NodeVersion == "" {
@@ -85,4 +90,34 @@ func ParseNodeVersion(raw string) software.Reported {
 		v.Version, v.Suffix = m[1], m[2]
 	}
 	return v
+}
+
+// ChainTips are the checkpoint numbers a node has reached, from its
+// getChainTips answer: the newest checkpoint it has seen on L1
+// (checkpointed) and the newest proven one.
+type ChainTips struct {
+	Checkpointed uint64
+	Proven       uint64
+}
+
+// ChainTips calls getChainTips.
+func (c *Client) ChainTips(ctx context.Context, endpoint string) (ChainTips, error) {
+	// Each tip has a block and a checkpoint; x3f compares checkpoints,
+	// which is what L1 knows. Pointers tell a missing number from 0.
+	type tip struct {
+		Checkpoint struct {
+			Number *uint64 `json:"number"`
+		} `json:"checkpoint"`
+	}
+	var resp struct {
+		Checkpointed tip `json:"checkpointed"`
+		Proven       tip `json:"proven"`
+	}
+	if err := c.callNode(ctx, endpoint, "getChainTips", &resp); err != nil {
+		return ChainTips{}, fmt.Errorf("getChainTips: %w", err)
+	}
+	if resp.Checkpointed.Checkpoint.Number == nil || resp.Proven.Checkpoint.Number == nil {
+		return ChainTips{}, errors.New("getChainTips: response lacks the checkpoint numbers")
+	}
+	return ChainTips{Checkpointed: *resp.Checkpointed.Checkpoint.Number, Proven: *resp.Proven.Checkpoint.Number}, nil
 }

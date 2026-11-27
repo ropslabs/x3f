@@ -15,6 +15,7 @@ POST https://aztec-testnet.drpc.org
 | `aztec_getNodeInfo-drpc-mainnet.json` | `aztec_getNodeInfo` | aztec-mainnet.drpc.org |
 | `node_getNodeInfo-drpc-mainnet.json` | `node_getNodeInfo` | aztec-mainnet.drpc.org |
 | `aztec_getNodeInfo-drpc-testnet.json` | `aztec_getNodeInfo` | aztec-testnet.drpc.org |
+| `aztec_getChainTips-drpc-{mainnet,testnet}.json` | `aztec_getChainTips` | recorded at 13:41 UTC, right after the L1 snapshot below |
 
 The response bodies are unchanged (they contain public data only: version,
 chain IDs, contract addresses, the node's ENR). No HTTP headers were stored.
@@ -38,11 +39,31 @@ requests. The response bodies are unchanged; no HTTP headers were stored.
 | `eth_call-revert-publicnode-mainnet.json` | `eth_call` of `getVersion()` on the mainnet registry, which has only `getVersion(uint256)`: reverts |
 | `eth_call-no-code-publicnode-mainnet.json` | `eth_call` of `getVersion()` on the zero address, which has no code: `"0x"` |
 
+### Sync snapshot (13:41 UTC)
+
+For the sync check, one snapshot per network was recorded the way x3f
+reads it: L1 first, then the node's `aztec_getChainTips` (above).
+
+| File | Request |
+|---|---|
+| `web3_sha3-{getTips,getCheckpoint,getSlotAt,getSlotDuration,getEpochDuration}-publicnode-mainnet.json` | `web3_sha3` of the signatures `getTips()`, `getCheckpoint(uint256)`, `getSlotAt(uint256)`, `getSlotDuration()`, `getEpochDuration()` |
+| `web3_sha3-Rollup__UnavailableTempCheckpointLog-publicnode-mainnet.json` | `web3_sha3` of the error signature `Rollup__UnavailableTempCheckpointLog(uint256,uint256,uint256)` |
+| `eth_getBlockByNumber-latest-publicnode-{mainnet,sepolia}.json` | `eth_getBlockByNumber` with `["latest", false]` |
+| `eth_call-getTips-publicnode-*.json` | `getTips()` on the canonical rollup: mainnet pending 36762, proven 36734; Sepolia 42994, 42991 |
+| `eth_call-getSlotAt-publicnode-*.json` | `getSlotAt(timestamp of that block)`: slot 57983, 43314 |
+| `eth_call-getSlotDuration-publicnode-*.json`, `eth_call-getEpochDuration-publicnode-*.json` | 72 seconds, 32 slots on both |
+| `eth_call-getCheckpoint-{pending,proven}-publicnode-*.json` | `getCheckpoint(n)` of the pending and the proven checkpoint; `slotNumber` is word 6 of the 12-word `CheckpointLog` |
+| `eth_call-getCheckpoint-unavailable-publicnode-*.json` | `getCheckpoint(pending - 65)`: reverts with `Rollup__UnavailableTempCheckpointLog`, since the rollup keeps only epochDuration × (proof submission epochs + 1) + 1 = 65 checkpoints (`core/libraries/rollup/STFLib.sol`) |
+
+Both nodes were in sync with L1 at that moment (checkpointed = pending,
+proven = proven).
+
 The canonical rollups and their versions (2070860440, 679261766) are those
 the dRPC nodes report in getNodeInfo. Function names and signatures are from
 aztec-packages v6.0.0 (commit 0219f11d81),
-`l1-contracts/src/governance/interfaces/IRegistry.sol` and
-`l1-contracts/src/core/interfaces/IRollup.sol` (via `IHaveVersion`).
+`l1-contracts/src/governance/interfaces/IRegistry.sol`,
+`l1-contracts/src/core/interfaces/IRollup.sol` (with `IHaveVersion`),
+`core/interfaces/IValidatorSelection.sol` and `core/libraries/Errors.sol`.
 
 ## networks/network_config.json — recorded, trimmed
 
