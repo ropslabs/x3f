@@ -1,8 +1,8 @@
 // Command x3f reports whether Ethereum node clients are up to date,
 // in sync, affected by known advisories and ready for the next hard fork,
-// whether Aztec nodes follow their network's rollup, are up to date and
-// affected by known advisories, and sends a Telegram message when a node's
-// status changes.
+// whether Aztec nodes follow their network's rollup, keep up with L1, are up
+// to date and affected by known advisories, and sends a Telegram message
+// when a node's status changes.
 package main
 
 import (
@@ -48,8 +48,9 @@ releases.
 
 Aztec nodes (type: aztec) are checked for their network, whether they follow
 the canonical rollup of their registry on L1 (read through the l1 node or
-l1_url), their version (aztec_getNodeInfo) and the published GitHub security
-advisories of aztec-packages.
+l1_url), whether they keep up with the checkpoints on L1, their version
+(aztec_getNodeInfo) and the published GitHub security advisories of
+aztec-packages. Run x3f every 5 minutes for Aztec nodes.
 
 With a telegram section in the config, x3f sends a Telegram message when a
 node's status changes (see -state-file). With -metrics-file, it writes
@@ -235,6 +236,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 	if f, ok := status.ForkDataNote(schedule, now); ok {
 		global = append(global, f)
 	}
+	// A stalled Aztec network is reported once, not as a problem of each
+	// node on it.
+	global = append(global, networkProgress(rows)...)
 	// Global entries are checked against the software of all nodes.
 	globalIgnore, _ := checkIgnoreList(cfg.IgnoreAdvisories, allInstalled(nodes), adv, true)
 	for _, f := range globalIgnore.Findings {

@@ -25,6 +25,7 @@ import (
 
 	"github.com/ropslabs/x3f/internal/aztec"
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/metrics"
 	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/software"
@@ -362,7 +363,55 @@ const (
 	mainnetRollup   = "0xe37a2663cc9c119ba41572c40fab0bbb23a5402f"
 	selCanonical    = "0x971b0e6b"
 	selVersion      = "0x0d8e6e2c"
+	selTips         = "0x88e4a073"
+	selCheckpoint   = "0x20fc4881"
+	selSlotAt       = "0xb9d09163"
+	selSlotDuration = "0xc4014c12"
+	selEpoch        = "0x5d3ea8f1"
 )
+
+// The mainnet sync snapshot of 13:41 UTC (internal/aztec/testdata/SOURCES.md):
+// time of the newest L1 block, the rollup's tips and their slots. The
+// node's getChainTips of the same moment has the same tips.
+const (
+	snapTime        = 1795786883
+	snapPending     = 36762
+	snapPendingSlot = 57983
+	snapProven      = 36734
+	snapProvenSlot  = 57951
+)
+
+// arg encodes n as the 32-byte argument of an eth_call.
+func arg(n uint64) string { return fmt.Sprintf("%064x", n) }
+
+// checkpointAt is a getCheckpoint answer for a checkpoint in slot: the
+// recorded answer for the pending checkpoint with its slot word replaced.
+func checkpointAt(t *testing.T, slot uint64) []byte {
+	t.Helper()
+	var resp map[string]any
+	if err := json.Unmarshal(l1Fixture(t, "eth_call-getCheckpoint-pending-publicnode-mainnet.json"), &resp); err != nil {
+		t.Fatal(err)
+	}
+	r := resp["result"].(string)
+	resp["result"] = r[:2+64*6] + arg(slot) + r[2+64*7:]
+	out, _ := json.Marshal(resp)
+	return out
+}
+
+// wordAnswer is an eth_call answer with one number.
+func wordAnswer(n uint64) []byte {
+	return []byte(`{"jsonrpc":"2.0","id":1,"result":"0x` + arg(n) + `"}`)
+}
+
+// aztecMainnet is an Aztec node answering getNodeInfo with nodeInfo and
+// getChainTips with the recorded mainnet snapshot.
+func aztecMainnet(t *testing.T, nodeInfo []byte) *httptest.Server {
+	t.Helper()
+	return mockClient(t, map[string][]byte{
+		"aztec_getNodeInfo":  nodeInfo,
+		"aztec_getChainTips": aztecFixture(t, "live/aztec_getChainTips-drpc-mainnet.json"),
+	})
+}
 
 // l1Node is a mock Ethereum execution client that also answers eth_call:
 // methods answers by method name, calls by "<to> <data>". It counts the
@@ -370,6 +419,29 @@ const (
 type l1Node struct {
 	*httptest.Server
 	ethCalls atomic.Int32
+	// log, if set, records every request as "<method>" or
+	// "eth_call <data>", in order.
+	log *requestLog
+}
+
+// requestLog is a request log shared by mock servers.
+type requestLog struct {
+	mu      sync.Mutex
+	entries []string
+}
+
+func (l *requestLog) add(e string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.entries = append(l.entries, e)
+}
+
+// index returns the position of the first entry that starts with prefix,
+// -1 if there is none.
+func (l *requestLog) index(prefix string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.IndexFunc(l.entries, func(e string) bool { return strings.HasPrefix(e, prefix) })
 }
 
 func newL1Node(t *testing.T, methods, calls map[string][]byte) *l1Node {
@@ -385,11 +457,16 @@ func newL1Node(t *testing.T, methods, calls map[string][]byte) *l1Node {
 		}
 		json.NewDecoder(r.Body).Decode(&req)
 		body, ok := methods[req.Method]
+		entry := req.Method
 		if req.Method == "eth_call" {
 			n.ethCalls.Add(1)
 			if len(req.Params) > 0 {
 				body, ok = calls[req.Params[0].To+" "+req.Params[0].Data]
+				entry += " " + req.Params[0].Data
 			}
+		}
+		if n.log != nil {
+			n.log.add(entry)
 		}
 		if !ok {
 			http.NotFound(w, r)
@@ -402,15 +479,29 @@ func newL1Node(t *testing.T, methods, calls map[string][]byte) *l1Node {
 }
 
 // mainnetL1 answers like an Ethereum mainnet node for the Aztec reads
-// (recorded answers).
-func mainnetL1(t *testing.T, methods map[string][]byte) *l1Node {
+// (recorded answers of the sync snapshot). methods adds or replaces
+// answers by method, calls by "<to> <data>".
+func mainnetL1(t *testing.T, methods, calls map[string][]byte) *l1Node {
 	t.Helper()
-	all := map[string][]byte{"eth_chainId": l1Fixture(t, "eth_chainId-publicnode-mainnet.json")}
+	all := map[string][]byte{
+		"eth_chainId":          l1Fixture(t, "eth_chainId-publicnode-mainnet.json"),
+		"eth_getBlockByNumber": l1Fixture(t, "eth_getBlockByNumber-latest-publicnode-mainnet.json"),
+	}
 	maps.Copy(all, methods)
-	return newL1Node(t, all, map[string][]byte{
-		mainnetRegistry + " " + selCanonical: l1Fixture(t, "eth_call-getCanonicalRollup-publicnode-mainnet.json"),
-		mainnetRollup + " " + selVersion:     l1Fixture(t, "eth_call-getVersion-publicnode-mainnet.json"),
-	})
+	r := mainnetRollup + " "
+	allCalls := map[string][]byte{
+		mainnetRegistry + " " + selCanonical:    l1Fixture(t, "eth_call-getCanonicalRollup-publicnode-mainnet.json"),
+		r + selVersion:                          l1Fixture(t, "eth_call-getVersion-publicnode-mainnet.json"),
+		r + selTips:                             l1Fixture(t, "eth_call-getTips-publicnode-mainnet.json"),
+		r + selSlotAt + arg(snapTime):           l1Fixture(t, "eth_call-getSlotAt-publicnode-mainnet.json"),
+		r + selSlotDuration:                     l1Fixture(t, "eth_call-getSlotDuration-publicnode-mainnet.json"),
+		r + selEpoch:                            l1Fixture(t, "eth_call-getEpochDuration-publicnode-mainnet.json"),
+		r + selCheckpoint + arg(snapPending):    l1Fixture(t, "eth_call-getCheckpoint-pending-publicnode-mainnet.json"),
+		r + selCheckpoint + arg(snapProven):     l1Fixture(t, "eth_call-getCheckpoint-proven-publicnode-mainnet.json"),
+		r + selCheckpoint + arg(snapPending-65): l1Fixture(t, "eth_call-getCheckpoint-unavailable-publicnode-mainnet.json"),
+	}
+	maps.Copy(allCalls, calls)
+	return newL1Node(t, all, allCalls)
 }
 
 // TestRunAztec checks an Aztec node end to end: its own table, the version
@@ -422,15 +513,13 @@ func TestRunAztec(t *testing.T) {
 	m := newMocks(t)
 	gh := newFakeGitHub(t)
 	// Live mainnet answer: nodeVersion 6.0.0.
-	node := mockClient(t, map[string][]byte{
-		"aztec_getNodeInfo": aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json"),
-	})
+	node := aztecMainnet(t, aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json"))
 	// The Ethereum node is checked as usual and is the Aztec node's L1.
 	l1 := mainnetL1(t, map[string][]byte{
 		"web3_clientVersion": fixture(t, "execution/geth.json"),
 		"eth_syncing":        fixture(t, "execution/syncing-false.json"),
 		"eth_config":         fixture(t, "execution/live/eth-config-publicnode-mainnet.json"),
-	})
+	}, nil)
 	path := writeConfig(t, `
 nodes:
   - name: l1
@@ -465,8 +554,8 @@ nodes:
 		want []string
 	}{
 		{"l1", []string{"OK", "l1", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled", "none known"}},
-		{"aztec-1", []string{"WARN", "aztec-1", "mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (canonical)", "1 (medium)"}},
-		{"aztec-down", []string{"CRIT", "aztec-down", "-", "ERROR", "-", "-"}},
+		{"aztec-1", []string{"WARN", "aztec-1", "mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (canonical)", "synced", "1 (medium)"}},
+		{"aztec-down", []string{"CRIT", "aztec-down", "-", "ERROR", "-", "-", "-"}},
 	}
 	for _, r := range rows {
 		if cells := rowCells(t, got, r.node); !slices.Equal(cells, r.want) {
@@ -517,12 +606,18 @@ nodes:
 		`x3f_check_status{node="aztec-1",check="network"} 0`,
 		`x3f_check_status{node="aztec-1",check="version"} 1`,
 		`x3f_check_status{node="aztec-1",check="rollup"} 0`,
+		`x3f_check_status{node="aztec-1",check="sync"} 0`,
+		`x3f_check_status{node="aztec-1",check="proven"} 0`,
 		`x3f_check_status{node="aztec-1",check="l1"} 0`,
 		`x3f_check_status{node="aztec-1",check="advisories"} 0`,
 		`x3f_check_status{node="aztec-1",check="ignore_advisories"} 0`,
 		`x3f_check_status{node="aztec-down",check="network"} 3`,
 		`x3f_check_status{node="aztec-down",check="version"} 2`,
 		`x3f_check_status{node="aztec-down",check="rollup"} 3`,
+		`x3f_check_status{node="aztec-down",check="sync"} 3`,
+		`x3f_check_status{node="aztec-down",check="proven"} 3`,
+		// Recorded: the newest checkpoint is in the current slot.
+		`x3f_aztec_checkpoint_age_seconds{network="mainnet"} 0`,
 		`x3f_check_status{node="aztec-down",check="advisories"} 3`,
 		`x3f_client_info{node="aztec-1",component="node",client="aztec",version="6.0.0",build="release"} 1`,
 		`x3f_client_latest_info{client="aztec",version="6.1.0"} 1`,
@@ -573,8 +668,8 @@ nodes:
 	if code != exitWarn {
 		t.Errorf("exit code = %d, want %d\n%s", code, exitWarn, got)
 	}
-	if cells := rowCells(t, got, "aztec-1"); cells[5] != "none known" {
-		t.Errorf("advisories cell = %q, want %q", cells[5], "none known")
+	if cells := rowCells(t, got, "aztec-1"); cells[6] != "none known" {
+		t.Errorf("advisories cell = %q, want %q", cells[6], "none known")
 	}
 	for _, want := range []string{
 		`NOTE  aztec-1 advisories: 2 ignored advisories for Aztec 6.0.0 (ignore_advisories): GHSA-`,
@@ -1943,16 +2038,16 @@ func TestRunAztecRollup(t *testing.T) {
 		noCalls  *l1Node // an L1 that must get no eth_call
 	}{
 		{
-			name: "canonical rollup", nodeInfo: live, l1: mainnetL1(t, nil).URL,
+			name: "canonical rollup", nodeInfo: live, l1: mainnetL1(t, nil, nil).URL,
 			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (canonical)"},
-			metrics: map[string]int{"network": 0, "rollup": 0},
+			metrics: map[string]int{"network": 0, "rollup": 0, "sync": 0, "proven": 0},
 		},
 		{
-			name: "old rollup", nodeInfo: oldRollup, l1: mainnetL1(t, nil).URL,
+			name: "old rollup", nodeInfo: oldRollup, l1: mainnetL1(t, nil, nil).URL,
 			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "4248422647, canonical 2070860440"},
 			want: []string{"CRIT  aztec-1 rollup: node follows rollup version 4248422647 (0x91ff8bbd8ebb07893010d50a48a1609e5ebd8e34), " +
 				"but the canonical rollup is version 2070860440 (0xe37a2663cc9c119ba41572c40fab0bbb23a5402f): the network has moved on, upgrade the node"},
-			metrics: map[string]int{"network": 0, "rollup": 2},
+			metrics: map[string]int{"network": 0, "rollup": 2, "sync": 3, "proven": 3},
 		},
 		{
 			// The node's registry is on mainnet; reading it on Sepolia
@@ -1960,7 +2055,7 @@ func TestRunAztecRollup(t *testing.T) {
 			name: "L1 on another chain", nodeInfo: live, l1: sepoliaL1.URL,
 			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (not checked)"},
 			want:    []string{`WARN  aztec-1 rollup: not checked: the l1_url endpoint is on sepolia, but the node's L1 is mainnet`},
-			metrics: map[string]int{"network": 0, "rollup": 3},
+			metrics: map[string]int{"network": 0, "rollup": 3, "sync": 3, "proven": 3},
 			noCalls: sepoliaL1,
 		},
 		{
@@ -1970,13 +2065,13 @@ func TestRunAztecRollup(t *testing.T) {
 			metrics: map[string]int{"network": 0, "rollup": 3},
 		},
 		{
-			name: "other network than configured", nodeInfo: live, l1: mainnetL1(t, nil).URL, extra: "    network: testnet\n",
+			name: "other network than configured", nodeInfo: live, l1: mainnetL1(t, nil, nil).URL, extra: "    network: testnet\n",
 			wantRow: []string{"mainnet", "Aztec 6.0.0 -> 6.1.0", "2070860440 (canonical)"},
 			want:    []string{"CRIT  aztec-1 network: node is on mainnet, expected testnet"},
 			metrics: map[string]int{"network": 2, "rollup": 0},
 		},
 		{
-			name: "unknown network", nodeInfo: unknownRegistry, l1: mainnetL1(t, nil).URL,
+			name: "unknown network", nodeInfo: unknownRegistry, l1: mainnetL1(t, nil, nil).URL,
 			wantRow: []string{"?", "Aztec 6.0.0 -> 6.1.0", "2070860440 (not checked)"},
 			want: []string{
 				"WARN  aztec-1 network: unknown network (L1 mainnet, registry 0x0000000000000000000000000000000000000001): not one of mainnet, testnet",
@@ -1987,7 +2082,7 @@ func TestRunAztecRollup(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			node := mockClient(t, map[string][]byte{"aztec_getNodeInfo": tt.nodeInfo})
+			node := aztecMainnet(t, tt.nodeInfo)
 			path := writeConfig(t, `
 nodes:
   - name: aztec-1
@@ -2008,7 +2103,7 @@ nodes:
 					t.Errorf("output does not contain %q:\n%s", w, got)
 				}
 			}
-			for _, check := range []string{"network", "rollup"} {
+			for _, check := range []string{"network", "rollup", "sync", "proven"} {
 				if !slices.ContainsFunc(tt.want, func(w string) bool { return strings.Contains(w, "aztec-1 "+check+":") }) &&
 					strings.Contains(got, "aztec-1 "+check+":") {
 					t.Errorf("unexpected %s finding:\n%s", check, got)
@@ -2043,9 +2138,7 @@ func TestRunAztecL1Node(t *testing.T) {
 	gh := newFakeGitHub(t)
 	// Derived: the node runs the latest release, so only the l1 check can
 	// make its row yellow.
-	node := mockClient(t, map[string][]byte{
-		"aztec_getNodeInfo": derivedNodeInfo(t, func(r map[string]any) { r["nodeVersion"] = "6.1.0" }),
-	})
+	node := aztecMainnet(t, derivedNodeInfo(t, func(r map[string]any) { r["nodeVersion"] = "6.1.0" }))
 	tests := []struct {
 		name      string
 		execution map[string][]byte // the L1 node's answers besides the Aztec reads
@@ -2075,7 +2168,7 @@ func TestRunAztecL1Node(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			l1 := mainnetL1(t, tt.execution)
+			l1 := mainnetL1(t, tt.execution, nil)
 			path := writeConfig(t, `
 nodes:
   - name: aztec-1
@@ -2111,5 +2204,220 @@ nodes:
 				}
 			}
 		})
+	}
+}
+
+// derivedChainTips returns the recorded mainnet getChainTips answer with
+// other checkpoint numbers for checkpointed and proven.
+func derivedChainTips(t *testing.T, checkpointed, proven uint64) []byte {
+	t.Helper()
+	var resp map[string]any
+	if err := json.Unmarshal(aztecFixture(t, "live/aztec_getChainTips-drpc-mainnet.json"), &resp); err != nil {
+		t.Fatal(err)
+	}
+	r := resp["result"].(map[string]any)
+	r["checkpointed"].(map[string]any)["checkpoint"].(map[string]any)["number"] = checkpointed
+	r["proven"].(map[string]any)["checkpoint"].(map[string]any)["number"] = proven
+	out, _ := json.Marshal(resp)
+	return out
+}
+
+// TestRunAztecSync checks the sync and proven checks and the finding about
+// a stalled network end to end. Based on the recorded mainnet snapshot;
+// checkpoint slots and the current slot that differ from it are derived
+// from the recorded answers (only the slot word is replaced).
+func TestRunAztecSync(t *testing.T) {
+	gh := newFakeGitHub(t)
+	r := mainnetRollup + " "
+	nodeInfo := derivedNodeInfo(t, func(r map[string]any) { r["nodeVersion"] = "6.1.0" })
+	tests := []struct {
+		name      string
+		tips      []byte            // the node's getChainTips; nil: none
+		calls     map[string][]byte // L1 answers besides the snapshot
+		wantCell  string
+		want      []string
+		checks    map[string]int // x3f_check_status of the node
+		ageSecond int            // x3f_aztec_checkpoint_age_seconds
+	}{
+		{
+			name: "synced (recorded)", tips: aztecFixture(t, "live/aztec_getChainTips-drpc-mainnet.json"),
+			wantCell: "synced", checks: map[string]int{"sync": 0, "proven": 0},
+		},
+		{
+			// One checkpoint behind, 2 slots apart: normal.
+			name: "2 slots behind", tips: derivedChainTips(t, snapPending-1, snapProven),
+			calls:    map[string][]byte{r + selCheckpoint + arg(snapPending-1): checkpointAt(t, snapPendingSlot-2)},
+			wantCell: "synced", checks: map[string]int{"sync": 0, "proven": 0},
+		},
+		{
+			name: "3 slots behind", tips: derivedChainTips(t, snapPending-2, snapProven),
+			calls:    map[string][]byte{r + selCheckpoint + arg(snapPending-2): checkpointAt(t, snapPendingSlot-3)},
+			wantCell: "3.6 min behind",
+			want:     []string{"WARN  aztec-1 sync: node is 3.6 min behind L1: checkpoint 36760, L1 at 36762"},
+			checks:   map[string]int{"sync": 1, "proven": 0},
+		},
+		{
+			name: "9 slots behind", tips: derivedChainTips(t, snapPending-8, snapProven),
+			calls:    map[string][]byte{r + selCheckpoint + arg(snapPending-8): checkpointAt(t, snapPendingSlot-9)},
+			wantCell: "10.8 min behind",
+			want:     []string{"CRIT  aztec-1 sync: node is 10.8 min behind L1: checkpoint 36754, L1 at 36762"},
+			checks:   map[string]int{"sync": 2, "proven": 0},
+		},
+		{
+			// Recorded revert: the rollup no longer stores the checkpoint.
+			name: "checkpoint no longer on L1", tips: derivedChainTips(t, snapPending-65, snapProven-40),
+			calls:    map[string][]byte{r + selCheckpoint + arg(snapProven-40): checkpointAt(t, snapProvenSlot-45)},
+			wantCell: "65 checkpoints behind",
+			want: []string{
+				"CRIT  aztec-1 sync: node is at checkpoint 36697, L1 at 36762: so far behind that its checkpoint is no longer stored on L1 (more than 76.8 min)",
+				"CRIT  aztec-1 proven: node is missing proofs: proven checkpoint 36694, L1 has proven 36734 (more than an epoch, 38.4 min)",
+			},
+			checks: map[string]int{"sync": 2, "proven": 2},
+		},
+		{
+			// The node has not seen the newest proof, 20 slots back.
+			name: "one proof behind", tips: derivedChainTips(t, snapPending, snapProven-20),
+			calls:    map[string][]byte{r + selCheckpoint + arg(snapProven-20): checkpointAt(t, snapProvenSlot-20)},
+			wantCell: "synced",
+			want:     []string{"WARN  aztec-1 proven: node has not seen the newest proof yet: proven checkpoint 36714, L1 has proven 36734 (24.0 min)"},
+			checks:   map[string]int{"sync": 0, "proven": 1},
+		},
+		{
+			// The node's proven checkpoint is older than one epoch.
+			name: "proofs missed", tips: derivedChainTips(t, snapPending, snapProven-33),
+			calls:    map[string][]byte{r + selCheckpoint + arg(snapProven-33): checkpointAt(t, snapProvenSlot-33)},
+			wantCell: "synced",
+			want:     []string{"CRIT  aztec-1 proven: node is missing proofs: proven checkpoint 36701, L1 has proven 36734 (more than an epoch, 38.4 min)"},
+			checks:   map[string]int{"sync": 0, "proven": 2},
+		},
+		{
+			// The network has had no checkpoint for 20 slots; the node is
+			// as far as L1, so it stays green.
+			name: "network stalls", tips: aztecFixture(t, "live/aztec_getChainTips-drpc-mainnet.json"),
+			calls:    map[string][]byte{r + selSlotAt + arg(snapTime): wordAnswer(snapPendingSlot + 20)},
+			wantCell: "synced",
+			want: []string{"NOTE  mainnet: no new checkpoint on L1 for 24.0 min (last: checkpoint 36762 at slot 57983); " +
+				"Aztec nodes cannot be more in sync than that"},
+			checks: map[string]int{"sync": 0, "proven": 0}, ageSecond: 1440,
+		},
+		{
+			name: "network stalls for more than an epoch", tips: aztecFixture(t, "live/aztec_getChainTips-drpc-mainnet.json"),
+			calls:    map[string][]byte{r + selSlotAt + arg(snapTime): wordAnswer(snapPendingSlot + 33)},
+			wantCell: "synced",
+			want:     []string{"WARN  mainnet: no new checkpoint on L1 for 39.6 min"},
+			checks:   map[string]int{"sync": 0, "proven": 0}, ageSecond: 2376,
+		},
+		{
+			// The node does not answer getChainTips.
+			name: "chain tips unavailable", tips: nil, wantCell: "?",
+			want:   []string{"WARN  aztec-1 sync: not checked: getChainTips: unexpected HTTP status 404 Not Found"},
+			checks: map[string]int{"sync": 3, "proven": 3},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			answers := map[string][]byte{"aztec_getNodeInfo": nodeInfo}
+			if tt.tips != nil {
+				answers["aztec_getChainTips"] = tt.tips
+			}
+			node := mockClient(t, answers)
+			l1 := mainnetL1(t, nil, tt.calls)
+			path := writeConfig(t, `
+nodes:
+  - name: aztec-1
+    type: aztec
+    url: `+node.URL+`
+    l1_url: `+l1.URL+`
+`)
+			metricsFile := filepath.Join(t.TempDir(), "x3f.prom")
+			var out bytes.Buffer
+			run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir(), "-metrics-file", metricsFile},
+				&out, &out, testEnv(gh, now))
+			got := out.String()
+			if cells := rowCells(t, got, "aztec-1"); cells[5] != tt.wantCell {
+				t.Errorf("SYNC cell %q, want %q (row %q)", cells[5], tt.wantCell, cells)
+			}
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("output does not contain %q:\n%s", w, got)
+				}
+			}
+			for _, check := range []string{"aztec-1 sync:", "aztec-1 proven:", "mainnet: no new checkpoint"} {
+				if !slices.ContainsFunc(tt.want, func(w string) bool { return strings.Contains(w, check) }) && strings.Contains(got, check) {
+					t.Errorf("unexpected %q finding:\n%s", check, got)
+				}
+			}
+			data, err := os.ReadFile(metricsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for check, v := range tt.checks {
+				if want := fmt.Sprintf("x3f_check_status{node=\"aztec-1\",check=%q} %d\n", check, v); !strings.Contains(string(data), want) {
+					t.Errorf("metrics lack %q", want)
+				}
+			}
+			age := fmt.Sprintf("x3f_aztec_checkpoint_age_seconds{network=\"mainnet\"} %d\n", tt.ageSecond)
+			if tt.tips != nil && !strings.Contains(string(data), age) {
+				t.Errorf("metrics lack %q:\n%s", age, data)
+			}
+			if tt.tips == nil && strings.Contains(string(data), "x3f_aztec_checkpoint_age_seconds{") {
+				t.Errorf("checkpoint age without sync data:\n%s", data)
+			}
+		})
+	}
+}
+
+// TestNetworkProgressOncePerNetwork checks that a stalled network gives one
+// finding and one metric sample, however many nodes run on it.
+func TestNetworkProgressOncePerNetwork(t *testing.T) {
+	stalled := func(network string) *status.NetworkProgressInput {
+		return &status.NetworkProgressInput{Network: network, CurrentSlot: 43310, L1Pending: 42991, L1PendingSlot: 43290,
+			SlotDuration: 72, EpochDuration: 32}
+	}
+	rows := []row{
+		{node: "a", aztecProgress: stalled("testnet")},
+		{node: "b"},
+		{node: "c", aztecProgress: stalled("testnet")},
+		{node: "d", aztecProgress: stalled("mainnet")},
+	}
+	var got []string
+	for _, f := range networkProgress(rows) {
+		got = append(got, f.Message[:strings.Index(f.Message, ":")])
+	}
+	if !slices.Equal(got, []string{"testnet", "mainnet"}) {
+		t.Errorf("findings for %q, want testnet, mainnet", got)
+	}
+	data := string(metrics.Render(buildMetrics(nil, rows, nil, true, now)))
+	if n := strings.Count(data, `x3f_aztec_checkpoint_age_seconds{network="testnet"} 1440`); n != 1 {
+		t.Errorf("%d testnet samples, want 1:\n%s", n, data)
+	}
+}
+
+// TestRunAztecSyncReadsL1First checks the order of the sync reads: the
+// rollup's tips on L1 before the node's chain tips, so that a checkpoint
+// appearing in between can only make the node look ahead.
+func TestRunAztecSyncReadsL1First(t *testing.T) {
+	gh := newFakeGitHub(t)
+	log := &requestLog{}
+	l1 := mainnetL1(t, nil, nil)
+	l1.log = log
+	// The node answers like the recorded one and logs into the same log.
+	node := newL1Node(t, map[string][]byte{
+		"aztec_getNodeInfo":  aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json"),
+		"aztec_getChainTips": aztecFixture(t, "live/aztec_getChainTips-drpc-mainnet.json"),
+	}, nil)
+	node.log = log
+	path := writeConfig(t, `
+nodes:
+  - name: aztec-1
+    type: aztec
+    url: `+node.URL+`
+    l1_url: `+l1.URL+`
+`)
+	var out bytes.Buffer
+	run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir()}, &out, &out, testEnv(gh, now))
+	tips, chainTips := log.index("eth_call "+selTips), log.index("aztec_getChainTips")
+	if tips < 0 || chainTips < tips {
+		t.Errorf("getTips at %d, getChainTips at %d; want L1 first:\n%q", tips, chainTips, log.entries)
 	}
 }

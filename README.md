@@ -244,8 +244,8 @@ Set exactly one of `l1` and `l1_url`. `l1` names an Ethereum node of the same co
 x3f calls `aztec_getNodeInfo` on the node (a node older than v5, which does not know it, is asked with `node_getNodeInfo`), and `eth_chainId` and `eth_call` on the L1, all read-only. Aztec nodes get a table of their own:
 
 ```
-STATUS  NODE     NETWORK  VERSION               ROLLUP                  ADVISORIES
-WARN    aztec-1  mainnet  Aztec 6.0.0 -> 6.1.0  2070860440 (canonical)  1 (medium)
+STATUS  NODE     NETWORK  VERSION               ROLLUP                  SYNC    ADVISORIES
+WARN    aztec-1  mainnet  Aztec 6.0.0 -> 6.1.0  2070860440 (canonical)  synced  1 (medium)
 
 Findings:
   WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 3 days ago (grace period 30 days)
@@ -262,9 +262,45 @@ Status: WARN (0 OK, 1 WARN, 0 CRIT)
 |---|---|---|---|
 | **Network** | a known network (mainnet or testnet, by the node's L1 chain and registry), and the configured one if `network:` is set | an unknown network | another network than configured |
 | **Rollup** | the node follows the canonical rollup, the one its registry on L1 names as current | not checked, with the reason: the L1 is unreachable, a read failed, or the L1 is on another chain than the node's L1 (the check is reported as unknown) | the node follows another rollup, for example after a network upgrade it did not follow |
+| **Sync** | the newest checkpoint the node has seen is at most 2 slots (2.4 min) behind the newest checkpoint on L1 | more than 2 slots behind | more than 8 slots (9.6 min) behind, or so far behind that L1 no longer stores the node's checkpoint (the rollup keeps the newest 65) |
+| **Proven** | the node knows the newest proof on L1 | its proven checkpoint is up to one epoch (32 slots, 38.4 min) behind L1's: one proof not seen yet | more than one epoch behind: proofs missed |
 | **L1** (only with `l1`) | the Ethereum node named in `l1` is OK | that Ethereum node is WARN or CRIT; its own findings are in the Ethereum table | never: a problem of the L1 node is red in its own row |
 
 x3f reads the registry through its own L1 access (`l1` or `l1_url`); which L1 endpoint the node itself uses, x3f cannot see. If that access is on another chain than the node's L1, x3f does not compare: it would read another network's registry.
+
+**Sync** compares like with like: the newest checkpoint the node has seen on L1 (`checkpointed` in `getChainTips`) with the rollup's newest checkpoint on L1 (`pending`), and the node's `proven` checkpoint with L1's. The usual gap between proven and pending does not count. Lags are measured in slots between the two checkpoints, with slot and epoch duration read from L1 (72 seconds and 32 slots on mainnet and testnet). x3f reads L1 first and then the node, so a checkpoint that appears in between can only make the node look ahead. A node that follows another rollup than the canonical one is not compared.
+
+Why these values: on mainnet consecutive checkpoints are up to 2 slots apart, so a node one checkpoint behind can look 2 slots behind. Red after 8 slots leaves time before the inactivity slashing of sequencers (testnet: 90 % of the attestations of one epoch missed, about 35 minutes; mainnet: 70 % in 2 consecutive epochs), if x3f runs often enough (see below).
+
+**A stalled network** is not a problem of the node: if L1 has had no new checkpoint for more than 8 slots, x3f adds one note per network, for example `NOTE  testnet: no new checkpoint on L1 for 21.6 min (last: checkpoint 42991 at slot 43290); Aztec nodes cannot be more in sync than that`, and a warning after more than one epoch. The nodes on it stay green as long as they are as far as L1. The metric `x3f_aztec_checkpoint_age_seconds` shows the same per network.
+
+#### How often to run x3f for Aztec nodes
+
+Run x3f **every 5 minutes** for Aztec nodes, not hourly as in the [metrics example](#prometheus-metrics) for Ethereum nodes. A node that falls behind is red after 9.6 minutes; with a 5-minute interval x3f notices that within about 15 minutes, well before testnet's inactivity slashing after about 35 minutes. An hourly run could notice it only after that limit.
+
+```
+*/5 * * * * /usr/local/bin/x3f -config /etc/x3f/x3f.yaml -metrics-file /var/lib/node_exporter/textfile/x3f.prom > /var/lib/x3f/last.txt 2>&1
+```
+
+Running this often costs GitHub nothing extra: releases and advisories come from the cache, which x3f refreshes at most once per `-cache-ttl` (default one hour), so it still asks GitHub twice per repository and hour; no token is needed. Each run sends about ten read-only requests per Aztec node to its L1 endpoint; check that a provider's rate limit allows that.
+
+With Prometheus, adapt the rule that alerts when x3f stops running to this interval, and alert on a stalled network if you want to:
+
+```yaml
+groups:
+  - name: x3f-aztec
+    rules:
+      - alert: X3fNotRunning
+        # three times the 5-minute interval
+        expr: time() - x3f_last_run_timestamp_seconds > 900 or absent(x3f_last_run_timestamp_seconds)
+        annotations:
+          summary: "x3f has not finished a run for 15 minutes"
+      - alert: AztecNetworkStalled
+        # more than one epoch (32 slots of 72 seconds) without a checkpoint
+        expr: x3f_aztec_checkpoint_age_seconds > 2304
+        annotations:
+          summary: "Aztec {{ $labels.network }}: no new checkpoint on L1 for more than an epoch"
+```
 
 The [status rules](#status-rules) for version and advisories are the same as for Ethereum clients:
 
@@ -274,7 +310,7 @@ The [status rules](#status-rules) for version and advisories are the same as for
 
 Known limitations:
 
-- **No sync status and upgrade readiness yet.** Whether the node keeps up with L1 and whether a pending governance proposal will move the network to a new rollup are not checked yet.
+- **No upgrade readiness yet.** Whether a pending governance proposal will move the network to a new rollup is not checked yet.
 - **Security releases without an advisory are not recognized as urgent.** aztec-node v6.1.0 is a security release, but no GitHub advisory was published for it, so it counts like any other release: yellow within the grace period. x3f adds a note when the release notes of a missing newer release contain the word "security", but the word alone does not change the status.
 - **Node releases before v6 are not in aztec-node.** For a node older than 6.0.0, "first newer release" is 6.0.0, not the real successor (such as 5.2.1). The status is still right: v6 is a new network, and such a node is far beyond the grace period.
 
@@ -332,11 +368,12 @@ The file is written atomically (a temporary file in the same directory, then ren
 | Metric | Labels | Value |
 |---|---|---|
 | `x3f_node_status` | `node` | 0 OK, 1 WARN, 2 CRIT |
-| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories`; for Aztec nodes `network`, `version`, `rollup`, `l1` (only with `l1`), `advisories`, `ignore_advisories` |
+| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories`; for Aztec nodes `network`, `version`, `rollup`, `sync`, `proven`, `l1` (only with `l1`), `advisories`, `ignore_advisories` |
 | `x3f_client_info` | `node`, `component`, `client`, `version`, `build` | 1; `component` is `execution` or `consensus` (Ethereum) or `node` (Aztec, `client="aztec"`); `build` is `release`, `prerelease`, `dev` or `unknown` |
 | `x3f_client_latest_info` | `client`, `version` | 1, the highest stable release known from GitHub |
 | `x3f_advisories` | `node`, `component`, `severity` | number of published advisories that affect the client and are not ignored; `severity` is `critical`, `high`, `medium`, `low` or `none` |
 | `x3f_next_fork_timestamp_seconds` | `network`, `fork` | activation time of the next scheduled fork; missing if none is scheduled |
+| `x3f_aztec_checkpoint_age_seconds` | `network` | time since the newest checkpoint of an Aztec network on L1, at the newest L1 block x3f read; missing if no Aztec node's sync could be checked |
 | `x3f_build_info` | `version`, `commit`, `goversion` | 1 |
 | `x3f_last_run_timestamp_seconds` | | when the last run ended |
 | `x3f_last_run_success` | | 1 if x3f could do its own work: GitHub data available (fresh or cached for less than 7 days), notification delivered, state file read and written; 0 otherwise. Problems of the nodes do not count here. |
@@ -363,7 +400,8 @@ groups:
         annotations:
           summary: "x3f: {{ $labels.node }} is WARN"
       - alert: X3fNotRunning
-        # about twice the cron interval (hourly in the example above)
+        # about twice the cron interval (hourly in the example above; for
+        # Aztec nodes see "How often to run x3f for Aztec nodes")
         expr: time() - x3f_last_run_timestamp_seconds > 7200 or absent(x3f_last_run_timestamp_seconds)
         annotations:
           summary: "x3f has not finished a run for 2 hours"

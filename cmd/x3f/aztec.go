@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -36,6 +37,12 @@ type aztecNode struct {
 	err error
 	// rollup holds the L1 reads; only set if getNodeInfo worked.
 	rollup status.RollupInput
+	// syncRead is set if the sync data was read (or its reading failed):
+	// only for a node that follows the canonical rollup of its network.
+	syncRead bool
+	sync     status.AztecSyncInput
+	// currentSlot is the rollup's slot at the newest L1 block.
+	currentSlot uint64
 }
 
 // newAztecNode returns the checker of an Aztec node. nodes is the whole
@@ -59,7 +66,7 @@ func (n *aztecNode) name() string { return n.cfg.Name }
 func (n *aztecNode) typ() string  { return config.TypeAztec }
 
 func (n *aztecNode) columns() []string {
-	return []string{"NETWORK", "VERSION", "ROLLUP", "ADVISORIES"}
+	return []string{"NETWORK", "VERSION", "ROLLUP", "SYNC", "ADVISORIES"}
 }
 
 func (n *aztecNode) software() []installed {
@@ -98,6 +105,74 @@ func (n *aztecNode) query(ctx context.Context, timeout time.Duration) {
 	r.CanonicalVersion, r.CanonicalVersionErr = withTimeout(ctx, timeout, n.l1Endpoint, func(ctx context.Context, ep string) (uint64, error) {
 		return n.client.RollupVersion(ctx, ep, r.Canonical)
 	})
+	if strings.EqualFold(r.Canonical, info.L1Contracts.Rollup) {
+		// On another rollup the rollup check is red; comparing the sync
+		// with an abandoned rollup would add nothing.
+		n.syncRead = true
+		n.sync.Err = n.querySync(ctx, timeout, info.L1Contracts.Rollup)
+	}
+}
+
+// querySync reads the sync data into n.sync and n.currentSlot: L1 first,
+// then the node, so a checkpoint that appears in between can only make the
+// node look ahead. It stops at the first error.
+func (n *aztecNode) querySync(ctx context.Context, timeout time.Duration, rollup string) error {
+	s := &n.sync
+	// l1 runs one L1 read with its own timeout; the closures adapt the
+	// client's methods to the signature withTimeout expects.
+	l1 := func(read func(ctx context.Context, ep string) (uint64, error)) (uint64, error) {
+		return withTimeout(ctx, timeout, n.l1Endpoint, read)
+	}
+	slotOf := func(cp uint64) func(context.Context, string) (uint64, error) {
+		return func(ctx context.Context, ep string) (uint64, error) {
+			return n.client.CheckpointSlot(ctx, ep, rollup, cp)
+		}
+	}
+	ts, err := l1(n.client.L1Time)
+	if err != nil {
+		return err
+	}
+	tips, err := withTimeout(ctx, timeout, n.l1Endpoint, func(ctx context.Context, ep string) (aztec.RollupTips, error) {
+		return n.client.Tips(ctx, ep, rollup)
+	})
+	if err != nil {
+		return err
+	}
+	s.L1Pending, s.L1Proven = tips.Pending, tips.Proven
+	for _, r := range []struct {
+		dst  *uint64
+		read func(context.Context, string) (uint64, error)
+	}{
+		{&n.currentSlot, func(ctx context.Context, ep string) (uint64, error) { return n.client.SlotAt(ctx, ep, rollup, ts) }},
+		{&s.SlotDuration, func(ctx context.Context, ep string) (uint64, error) { return n.client.SlotDuration(ctx, ep, rollup) }},
+		{&s.EpochDuration, func(ctx context.Context, ep string) (uint64, error) { return n.client.EpochDuration(ctx, ep, rollup) }},
+		{&s.L1PendingSlot, slotOf(tips.Pending)},
+		{&s.L1ProvenSlot, slotOf(tips.Proven)},
+	} {
+		if *r.dst, err = l1(r.read); err != nil {
+			return err
+		}
+	}
+
+	node, err := withTimeout(ctx, timeout, n.cfg.URL, n.client.ChainTips)
+	if err != nil {
+		return err
+	}
+	s.NodeCheckpointed, s.NodeProven = node.Checkpointed, node.Proven
+	// The slots of the node's checkpoints are only needed if it is behind.
+	if node.Checkpointed < tips.Pending {
+		s.NodeCheckpointedSlot, err = l1(slotOf(node.Checkpointed))
+		if s.NodeCheckpointedGone = errors.Is(err, aztec.ErrCheckpointUnavailable); err != nil && !s.NodeCheckpointedGone {
+			return err
+		}
+	}
+	if node.Proven < tips.Proven {
+		s.NodeProvenSlot, err = l1(slotOf(node.Proven))
+		if s.NodeProvenGone = errors.Is(err, aztec.ErrCheckpointUnavailable); err != nil && !s.NodeProvenGone {
+			return err
+		}
+	}
+	return nil
 }
 
 // assess applies the network and rollup rules of Aztec nodes and the same
@@ -114,20 +189,34 @@ func (n *aztecNode) assess(up upstream, p assessParams) row {
 
 	// Without getNodeInfo there is nothing to compare; the version check
 	// already reports why.
-	var netCheck, rollupCheck status.Assessment
-	netCell, rollupCell := "-", "-"
-	rollupNotRun := true
+	var netCheck, rollupCheck, syncCheck, provenCheck status.Assessment
+	netCell, rollupCell, syncCell := "-", "-", "-"
+	rollupNotRun, syncNotRun := true, true
 	if n.err == nil {
 		netCheck, netCell = status.AssessAztecNetwork(status.AztecNetworkInput{
 			Expected: n.cfg.Network, L1ChainID: n.info.L1ChainID, Registry: n.info.L1Contracts.Registry,
 		})
 		rollupCheck, rollupCell, rollupNotRun = status.AssessRollup(n.rollup)
+		// Without the sync data, the rollup check says why.
+		syncCell = "?"
+	}
+	switch {
+	case !n.syncRead:
+	case n.sync.Err != nil:
+		syncCheck.Level = status.Warn
+		syncCheck.Findings = []status.Finding{{Level: status.Warn, Message: fmt.Sprintf("not checked: %v", n.sync.Err)}}
+	default:
+		syncNotRun = false
+		syncCheck, syncCell = status.AssessAztecSync(n.sync)
+		provenCheck = status.AssessAztecProven(n.sync)
 	}
 
 	findings := []layerFindings{
 		{"network", netCheck, n.err != nil},
 		{"version", status.AssessVersion(vi), false},
 		{"rollup", rollupCheck, rollupNotRun},
+		{"sync", syncCheck, syncNotRun},
+		{"proven", provenCheck, syncNotRun},
 	}
 	if n.cfg.L1 != "" {
 		// Set by link once the L1 node's row is known; until then the
@@ -141,11 +230,20 @@ func (n *aztecNode) assess(up upstream, p assessParams) row {
 		layerFindings{"ignore_advisories", ignoreCheck, len(n.cfg.IgnoreAdvisories) > 0 && !ignoreRan},
 	)
 	rw := row{
-		cells:    []string{netCell, formatVersion(n.version, n.err, vi), rollupCell, advCell},
+		cells:    []string{netCell, formatVersion(n.version, n.err, vi), rollupCell, syncCell, advCell},
 		findings: findings,
 	}
 	if adv.Counts != nil {
 		rw.advisories = []componentCounts{{"node", adv.Counts}}
+	}
+	// The progress of the network, for a known network only: its name
+	// is what the finding and the metric label show.
+	if net, ok := aztec.IdentifyNetwork(n.info.L1ChainID, n.info.L1Contracts.Registry); ok && !syncNotRun {
+		rw.aztecProgress = &status.NetworkProgressInput{
+			Network: net.Name, CurrentSlot: n.currentSlot,
+			L1Pending: n.sync.L1Pending, L1PendingSlot: n.sync.L1PendingSlot,
+			SlotDuration: n.sync.SlotDuration, EpochDuration: n.sync.EpochDuration,
+		}
 	}
 	return rw
 }

@@ -140,6 +140,28 @@ type row struct {
 	// nextForks are the next scheduled forks of the networks the node is
 	// on, for the metrics.
 	nextForks []nextFork
+	// aztecProgress tells how long the Aztec network of the node has been
+	// without a new checkpoint on L1; nil if not known. It gives a
+	// finding about the network and a metric, once per network.
+	aztecProgress *status.NetworkProgressInput
+}
+
+// networkProgress returns the findings about Aztec networks without a new
+// checkpoint for long, once per network, in the order of the rows.
+func networkProgress(rows []row) []status.Finding {
+	var out []status.Finding
+	var seen []string
+	for _, r := range rows {
+		p := r.aztecProgress
+		if p == nil || slices.Contains(seen, p.Network) {
+			continue
+		}
+		seen = append(seen, p.Network)
+		if f, ok := status.AssessNetworkProgress(*p); ok {
+			out = append(out, f)
+		}
+	}
+	return out
 }
 
 // componentCounts are the advisory counts per severity of one component.

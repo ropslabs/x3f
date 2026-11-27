@@ -94,12 +94,25 @@ func buildMetrics(nodes []checker, rows []row, rel map[software.Repo]releaseData
 		}
 	}
 
+	checkpointAge := metrics.Family{Name: "x3f_aztec_checkpoint_age_seconds", Help: "Time since the newest checkpoint of an Aztec network on L1, at the newest L1 block x3f read."}
+	var aztecNetworks []string
+	for _, r := range rows {
+		p := r.aztecProgress
+		if p == nil || slices.Contains(aztecNetworks, p.Network) {
+			continue
+		}
+		aztecNetworks = append(aztecNetworks, p.Network)
+		checkpointAge.Samples = append(checkpointAge.Samples, metrics.Sample{
+			Labels: []metrics.Label{{Name: "network", Value: p.Network}}, Value: p.CheckpointAge().Seconds(),
+		})
+	}
+
 	successValue := 0.0
 	if success {
 		successValue = 1
 	}
 	return []metrics.Family{
-		nodeStatus, checkStatus, clientInfo, latestInfo, advisories, nextFork,
+		nodeStatus, checkStatus, clientInfo, latestInfo, advisories, nextFork, checkpointAge,
 		{Name: "x3f_build_info", Help: "Version of x3f.", Samples: []metrics.Sample{{Labels: []metrics.Label{
 			{Name: "version", Value: buildVersion()}, {Name: "commit", Value: buildCommit()}, {Name: "goversion", Value: runtime.Version()},
 		}, Value: 1}}},

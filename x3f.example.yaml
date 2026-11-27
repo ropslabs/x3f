@@ -33,8 +33,8 @@ nodes:
     # network anyway; if this is set, a node on another network is critical.
     network: mainnet
 
-  # An Aztec node (network, rollup, version and security advisories; see
-  # "Aztec nodes" in the README). Its L1 is either an Ethereum node of this
+  # An Aztec node (network, rollup, sync, version and security advisories;
+  # see "Aztec nodes" in the README; run x3f every 5 minutes for it). Its L1 is either an Ethereum node of this
   # config (l1) or a provider endpoint (l1_url); set exactly one of them.
   # - name: aztec-1
   #   type: aztec
