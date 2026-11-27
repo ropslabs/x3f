@@ -44,7 +44,7 @@ Goal: for each configured node, report whether its clients are up to date, wheth
 ## Layout
 
 ```
-cmd/x3f/              CLI entry point
+cmd/x3f/              CLI entry point; node.go: node type interface, ethereum.go: Ethereum node type
 internal/config/      load and validate x3f.yaml
 internal/network/     known networks (mainnet, sepolia, hoodi) and chain IDs
 internal/ethereum/    query clients (version, sync status, chain ID, fork config), parse version strings
