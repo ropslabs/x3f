@@ -323,14 +323,24 @@ func (c *forkCheck) consensusNode(l layer, cfg ethereum.ConsensusForkConfig) {
 		}
 	}
 
+	// rescheduled reports whether forks.yaml lists p's consensus fork
+	// again, not postponed, at epoch ep: the new date of a postponed fork.
+	// The checks of scheduled forks cover that one.
+	rescheduled := func(p forks.Fork, ep uint64) bool {
+		return slices.ContainsFunc(n.Forks, func(f forks.Fork) bool {
+			return !f.Postponed && !f.BPO && strings.EqualFold(f.Consensus, p.Consensus) && f.Epoch == ep
+		})
+	}
+
 	// Postponed forks must not be scheduled at their former epoch. A
-	// different real epoch means a new date that forks.yaml lacks.
+	// different real epoch means a new date that forks.yaml lacks, unless
+	// it lists that date already.
 	for _, p := range n.Postponed() {
 		why, ep, scheduled := state(p)
 		switch {
 		case why == "":
 			c.oldSchedule(l, p, fmt.Sprintf("epoch %d", p.Epoch))
-		case scheduled && ep >= oldest:
+		case scheduled && ep >= oldest && !rescheduled(p, ep):
 			c.unknownFork(l, fmt.Sprintf("%s at epoch %d", p.Consensus, ep), n.EpochTime(ep))
 		}
 	}

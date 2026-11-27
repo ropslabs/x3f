@@ -595,3 +595,61 @@ func TestAssessForksNodeNextFork(t *testing.T) {
 		})
 	}
 }
+
+// A postponed fork that gets a new date: forks.yaml keeps the postponed
+// entry (to catch releases with the former schedule) and adds the new one
+// under the same name, as planned for Hoodi Glamsterdam after ACDC #192.
+// A node with the new schedule must be ready, not "schedules unknown fork".
+func TestAssessForksRescheduled(t *testing.T) {
+	pastEp, pastTs := epochAt(forkNow.Add(-30 * 24 * time.Hour))
+	oldEp, oldTs := epochAt(forkNow.Add(-10 * 24 * time.Hour))
+	newEp, newTs := epochAt(forkNow.Add(10*24*time.Hour + time.Hour))
+	s := synthetic(t, fmt.Sprintf(`      - {name: Glam, execution: Amsterdam, consensus: Gloas, status: postponed, epoch: %d, timestamp: %d, scheduled_in: {geth: 1.1.0, lighthouse: 1.1.0}, removed_in: {geth: 1.1.1, lighthouse: 1.1.1}, sources: [https://example.org/synthetic]}
+      - {name: Glam, execution: Amsterdam, consensus: Gloas, epoch: %d, timestamp: %d, min_versions: {geth: 1.2.0, lighthouse: 1.2.0}, sources: [https://example.org/synthetic]}
+`, oldEp, oldTs, newEp, newTs))
+	geth, lighthouse := cv("Geth/v1.2.0-stable/x"), cv("Lighthouse/v1.2.0-abc1234/x")
+	newDate := time.Unix(newTs, 0).UTC().Format(time.DateOnly)
+
+	tests := []struct {
+		name      string
+		el, cl    ethereum.ClientVersion
+		elCfg     *ethereum.ExecutionForkConfig
+		clCfg     *ethereum.ConsensusForkConfig
+		wantLevel Level
+		wantCell  string
+		wantMsgs  []string
+	}{
+		{name: "new schedule", el: geth, cl: lighthouse,
+			elCfg: elConfig(pastTs, newTs), clCfg: clConfig(map[string]uint64{"FULU": pastEp, "GLOAS": newEp}),
+			wantLevel: OK, wantCell: "Glam in 10 days: ready"},
+		{name: "new schedule, by version", el: geth, cl: lighthouse,
+			wantLevel: OK, wantCell: "Glam in 10 days: ready"},
+		{name: "CL still on the former epoch", el: geth, cl: lighthouse,
+			elCfg: elConfig(pastTs, newTs), clCfg: clConfig(map[string]uint64{"FULU": pastEp, "GLOAS": oldEp}),
+			wantLevel: Crit, wantCell: "CL has old Glam schedule",
+			wantMsgs: []string{"Lighthouse 1.2.0 still schedules the postponed Glam at its former time",
+				fmt.Sprintf("Lighthouse 1.2.0 is not ready for Glam on mainnet (%s, in 10 days): GLOAS_FORK_EPOCH is %d, not %d; the release supports it", newDate, oldEp, newEp)}},
+		{name: "CL at a third epoch", el: geth, cl: lighthouse,
+			elCfg: elConfig(pastTs, newTs), clCfg: clConfig(map[string]uint64{"FULU": pastEp, "GLOAS": newEp + 1}),
+			wantLevel: Crit, wantCell: "CL schedules unknown fork",
+			wantMsgs: []string{fmt.Sprintf("Lighthouse 1.2.0 schedules Gloas at epoch %d", newEp+1),
+				fmt.Sprintf("GLOAS_FORK_EPOCH is %d, not %d", newEp+1, newEp)}},
+		{name: "release with the former schedule, by version", el: cv("Geth/v1.1.0-stable/x"), cl: lighthouse,
+			wantLevel: Crit, wantCell: "EL has old Glam schedule",
+			wantMsgs: []string{"Geth 1.1.0 still contains the postponed Glam schedule", "Geth 1.1.0 is not ready for Glam"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := AssessForks(ForkInput{
+				Schedule: s, ChainID: 1, HaveChain: true,
+				Execution: tt.el, Consensus: tt.cl,
+				ExecutionConfig: tt.elCfg, ConsensusConfig: tt.clCfg,
+				Now: forkNow, CriticalWithin: 14 * 24 * time.Hour,
+			})
+			if r.Cell != tt.wantCell {
+				t.Errorf("cell = %q, want %q", r.Cell, tt.wantCell)
+			}
+			checkAssessment(t, r.Assessment, tt.wantLevel, tt.wantMsgs)
+		})
+	}
+}
