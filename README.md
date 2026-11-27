@@ -6,7 +6,7 @@ x3f tells you what is running where, in which version, who owns it, and what nee
 
 > **Status:** early stage (v0.x). The Ethereum node check below works today, including known security advisories of the clients, Telegram notifications on status changes and Prometheus metrics; inventory is planned. Flags and output may still change between 0.x releases.
 >
-> **The Ethereum module is paused.** Development continues with a module for [Aztec](https://aztec.network) nodes. The Ethereum checks keep working, but the built-in fork data is not maintained after 2026-11-27; see [Fork readiness](#fork-readiness) for the known gap on Hoodi.
+> **The Ethereum module is paused.** Development continues with a module for [Aztec](https://aztec.network) nodes; its first part, version and security advisories, is in the main branch (see [Aztec nodes](#aztec-nodes)). The Ethereum checks keep working, but the built-in fork data is not maintained after 2026-11-27; see [Fork readiness](#fork-readiness) for the known gap on Hoodi.
 >
 > *An n-day is a known vulnerability that already has a fix. Many attacks don't need a zero-day, just a system where the existing patch was never applied. x3f finds those systems.*
 
@@ -14,7 +14,7 @@ x3f tells you what is running where, in which version, who owns it, and what nee
 
 ## Quick start
 
-x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, whether a published security advisory affects them, and whether they are ready for the next hard fork. It can send a Telegram message when a node's status changes and write Prometheus metrics. It is a single binary that only reads from your nodes.
+x3f checks Ethereum nodes: network, client versions, sync status, whether the clients are behind their latest stable release, whether a published security advisory affects them, and whether they are ready for the next hard fork. For Aztec nodes it checks the version and the security advisories so far (see [Aztec nodes](#aztec-nodes)). It can send a Telegram message when a node's status changes and write Prometheus metrics. It is a single binary that only reads from your nodes.
 
 ### Install
 
@@ -80,6 +80,7 @@ x3f asks GitHub for the latest releases and security advisories and caches the a
 | Execution clients | Geth, Reth, Nethermind, Erigon, Besu, Ethrex |
 | Consensus clients | Lighthouse, Prysm, Teku, Nimbus, Lodestar, Grandine |
 | Networks | mainnet, Sepolia, Hoodi |
+| Aztec | node version and advisories of [aztec-packages](https://github.com/AztecProtocol/aztec-packages) (see [Aztec nodes](#aztec-nodes)) |
 
 The fork schedule is built into x3f. To get new fork dates, update x3f; x3f adds a note when its fork data is older than 30 days. Until a new release is out, you can pass your own schedule with `-forks` (same format as [`internal/forks/forks.yaml`](internal/forks/forks.yaml)).
 
@@ -218,6 +219,53 @@ nodes:
 
 An ignored advisory no longer counts for the status and the ADVISORIES column, but it is still listed as a note with its reason, so nothing disappears silently. From the `expires` date (00:00 UTC) the entry no longer applies: the advisory counts again and a note says so. A node entry replaces a global entry with the same ID. An ID that is not among the advisories of the clients it applies to is reported as a note, to catch typos. For a global entry these are the clients your nodes run, so the note may also mean the entry is for a client none of them runs right now. This check only runs when x3f knows every client and its advisories.
 
+### Aztec nodes
+
+An Aztec node is a node with `type: aztec`. It needs its JSON-RPC endpoint and its L1, an Ethereum node:
+
+```yaml
+nodes:
+  - name: eth-mainnet-1
+    execution_url: http://localhost:8545
+    beacon_url: http://localhost:5052
+  - name: aztec-1
+    type: aztec
+    url: http://localhost:8080      # the node's JSON-RPC endpoint
+    l1: eth-mainnet-1               # the Ethereum node above
+  - name: aztec-2
+    type: aztec
+    url: http://aztec-2:8080
+    l1_url: https://eth.example.com/v3/<key>   # or: an L1 provider endpoint
+```
+
+Set exactly one of `l1` and `l1_url`. `l1` names an Ethereum node of the same config; x3f checks that node as usual. `l1_url` is for an L1 provider: x3f will only read the Aztec contracts through it and does not check it as an Ethereum node, so a provider's load balancer does not turn the Aztec node yellow. The L1 is validated now but used only by the upcoming checks (network, rollup version, upgrade readiness). Like all URLs, `url` and `l1_url` are never printed. The fields of one node type are not allowed on the other (for example `execution_url` on an Aztec node).
+
+x3f calls `aztec_getNodeInfo` (read-only); a node older than v5, which does not know it, is asked with `node_getNodeInfo`. Aztec nodes get a table of their own:
+
+```
+STATUS  NODE     VERSION               ADVISORIES
+WARN    aztec-1  Aztec 6.0.0 -> 6.1.0  1 (medium)
+
+Findings:
+  WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 8 days ago (grace period 30 days)
+  NOTE  aztec-1 advisories: Aztec 6.0.0 is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: "UltraHonk native verifier throws or aborts on a recursive pairing acc…"; packages @aztec/bb.js, @aztec-foundation/bb.js, barretenberg-rs); https://github.com/AztecProtocol/aztec-packages/security/advisories
+  NOTE  aztec-1 advisories: cannot tell whether Aztec 6.0.0 is affected by GHSA-778c-2h5c-8r96 (low: "Checkpoint with over 72 blocks pushed via the escape hatch and proven…"; package @aztec/archiver @aztec/stdlib), check it yourself (affected versions "current Ignition mainnet release (v4 ta…", patched "> v5.0.0-rc.1")
+
+Status: WARN (0 OK, 1 WARN, 0 CRIT)
+```
+
+(Real output from 2026-11-27 against the public Aztec mainnet endpoint of drpc.)
+
+The [status rules](#status-rules) for version and advisories are the same as for Ethereum clients, with the releases and advisories of `AztecProtocol/aztec-packages`:
+
+- **Releases:** only a plain version such as `6.1.0` is a stable release. `rc.N` is a pre-release; `nightly`, `dev` and `commit` builds are dev builds; any other suffix (for example `devnet` or `private`) is unrecognized. All of them are yellow on a node and never count as the latest release, even where GitHub does not mark them as pre-releases.
+- **Advisories:** aztec-packages releases many packages under one version, and an advisory counts if any of its packages is affected. The finding names the affected packages, so you can judge whether the node uses them; if not, add the advisory to [`ignore_advisories`](#ignoring-an-advisory).
+
+Known limitations:
+
+- **Version and advisories only.** Network, sync status and upgrade readiness of Aztec nodes are not checked yet.
+- **One page of releases.** x3f reads the newest 100 releases of aztec-packages, most of them nightly builds; in November 2026 they reached back to April 2026 (4.2.0). For a node older than that, "first newer release" names the oldest stable release on that page instead of the real one. The status is still right: such a node is far beyond the grace period.
+
 ### Telegram notifications
 
 x3f can send a Telegram message when a node's status changes. Create a bot with [@BotFather](https://core.telegram.org/bots/features#botfather), start a chat with it or add it to a group or channel, and add the chat to `x3f.yaml`:
@@ -272,8 +320,8 @@ The file is written atomically (a temporary file in the same directory, then ren
 | Metric | Labels | Value |
 |---|---|---|
 | `x3f_node_status` | `node` | 0 OK, 1 WARN, 2 CRIT |
-| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories` |
-| `x3f_client_info` | `node`, `component`, `client`, `version`, `build` | 1; `build` is `release`, `prerelease`, `dev` or `unknown` |
+| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories`; for Aztec nodes `version`, `advisories`, `ignore_advisories` |
+| `x3f_client_info` | `node`, `component`, `client`, `version`, `build` | 1; `component` is `execution` or `consensus` (Ethereum) or `node` (Aztec, `client="aztec"`); `build` is `release`, `prerelease`, `dev` or `unknown` |
 | `x3f_client_latest_info` | `client`, `version` | 1, the highest stable release known from GitHub |
 | `x3f_advisories` | `node`, `component`, `severity` | number of published advisories that affect the client and are not ignored; `severity` is `critical`, `high`, `medium`, `low` or `none` |
 | `x3f_next_fork_timestamp_seconds` | `network`, `fork` | activation time of the next scheduled fork; missing if none is scheduled |

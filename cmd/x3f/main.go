@@ -1,5 +1,6 @@
 // Command x3f reports whether Ethereum node clients are up to date,
 // in sync, affected by known advisories and ready for the next hard fork,
+// whether Aztec nodes are up to date and affected by known advisories,
 // and sends a Telegram message when a node's status changes.
 package main
 
@@ -43,6 +44,9 @@ are ready for the next fork: the node's own fork schedule (eth_config,
 /eth/v1/config/spec) is compared with the built-in one (see -forks); if a
 client does not report it, its version is compared with the announced
 releases.
+
+Aztec nodes (type: aztec) are checked for their version (aztec_getNodeInfo)
+and the published GitHub security advisories of aztec-packages.
 
 With a telegram section in the config, x3f sends a Telegram message when a
 node's status changes (see -state-file). With -metrics-file, it writes
