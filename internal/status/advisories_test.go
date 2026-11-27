@@ -505,9 +505,10 @@ func TestAssessAdvisoriesMediumWithoutFixIsNote(t *testing.T) {
 				t.Errorf("level %v, cell %q, counts %v; want OK, \"1 (medium)\", 1 medium", r.Level, r.Cell, r.Counts)
 			}
 			want := []string{
-				"Aztec " + running + " is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: ",
+				"Aztec " + running + " is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: " +
+					`GHSA-73xc-j27q-wg75 (medium: "UltraHonk native verifier throws or aborts on a recursive pairing acc…"; packages @aztec/bb.js, @aztec-foundation/bb.js, barretenberg-rs); `,
 				// The free-text range of GHSA-778c-2h5c-8r96.
-				"cannot tell whether Aztec " + running + " is affected by GHSA-778c-2h5c-8r96",
+				"cannot tell whether Aztec " + running + ` is affected by GHSA-778c-2h5c-8r96 (low: "Checkpoint with over 72 blocks pushed via the escape hatch and proven…"; package @aztec/archiver @aztec/stdlib), `,
 			}
 			if len(r.Findings) != len(want) {
 				t.Fatalf("findings %v, want %d", r.Findings, len(want))
@@ -518,5 +519,45 @@ func TestAssessAdvisoriesMediumWithoutFixIsNote(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestAssessAdvisoriesPackagesOnlyWhereListed checks that findings name
+// packages only for software that lists them: the Lodestar advisories name
+// packages too, but Ethereum findings stay as they were.
+func TestAssessAdvisoriesPackagesOnlyWhereListed(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	advs := recorded[releases.Advisory](t, "advisories", "ChainSafe_lodestar.json")
+	r := AssessAdvisories(AdvisoryInput{
+		// "< 1.24.0" of GHSA-m9c9-mc2h-9wjw, package "@lodestar/reqresp".
+		Version:    software.Reported{Raw: "Lodestar/v1.23.1", Name: software.Lodestar, Version: "1.23.1"},
+		Advisories: &releases.AdvisoryResult{Advisories: advs, FetchedAt: now},
+		Now:        now,
+	})
+	if len(r.Findings) == 0 || !strings.Contains(r.Findings[0].Message, "GHSA-m9c9-mc2h-9wjw") {
+		t.Fatalf("findings %v, want one naming GHSA-m9c9-mc2h-9wjw", r.Findings)
+	}
+	for _, f := range r.Findings {
+		if strings.Contains(f.Message, "package") || strings.Contains(f.Message, "@lodestar") {
+			t.Errorf("finding names packages: %q", f.Message)
+		}
+	}
+}
+
+func TestListPackages(t *testing.T) {
+	tests := []struct {
+		names []string
+		want  string
+	}{
+		{[]string{"barretenberg-rs"}, "package barretenberg-rs"},
+		{[]string{"a", "b", "c"}, "packages a, b, c"},
+		{[]string{"a", "b", "c", "d", "e"}, "packages a, b, c and 2 more"},
+		// Free text from GitHub: control characters go, long names are cut.
+		{[]string{"evil\x1b[31m\u202epkg", strings.Repeat("x", 50)}, "packages evil [31m pkg, " + strings.Repeat("x", 39) + "…"},
+	}
+	for _, tt := range tests {
+		if got := listPackages(tt.names); got != tt.want {
+			t.Errorf("listPackages(%q) = %q, want %q", tt.names, got, tt.want)
+		}
 	}
 }

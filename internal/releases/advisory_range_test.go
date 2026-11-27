@@ -166,6 +166,46 @@ func TestAdvisoryCheckRecorded(t *testing.T) {
 	}
 }
 
+func TestAdvisoryPackages(t *testing.T) {
+	aztec := software.Repo{Owner: "AztecProtocol", Name: "aztec-packages"}
+	tests := []struct {
+		name    string
+		repo    software.Repo
+		ghsa    string
+		running string
+		m       Match
+		want    []string
+	}{
+		// Three entries ">= 6.0.0-nightly.20260721, < 7.0.0-0" without a
+		// fix; the entries for 4.x and 7.0.0 nightlies do not match.
+		{"affected", aztec, "GHSA-73xc-j27q-wg75", "6.0.0", Affected,
+			[]string{"@aztec/bb.js", "@aztec-foundation/bb.js", "barretenberg-rs"}},
+		// "@aztec/bb.js" and "barretenberg-rs" each have three entries
+		// for 4.x and 5.x; 5.2.0 matches "< 5.2.1" once per package.
+		{"each package once", aztec, "GHSA-2hc8-mq24-76v2", "5.2.0", Affected,
+			[]string{"@aztec/bb.js", "barretenberg-rs"}},
+		{"not affected", aztec, "GHSA-2hc8-mq24-76v2", "6.0.0", Affected, nil},
+		// One entry with a free-text range; its package name contains a
+		// space, as GitHub has it.
+		{"unclear", aztec, "GHSA-778c-2h5c-8r96", "6.0.0", Unclear, []string{"@aztec/archiver @aztec/stdlib"}},
+		{"other match", aztec, "GHSA-73xc-j27q-wg75", "6.0.0", Unclear, nil},
+		// "<= 1.16.8": the entry without a package name is left out.
+		{"entry without a name", geth, "GHSA-m6j8-rg6r-7mv8", "1.16.8", Affected, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			running, ok := ParseVersion(tt.running)
+			if !ok {
+				t.Fatalf("bad test version %q", tt.running)
+			}
+			got := recordedAdvisory(t, tt.repo, tt.ghsa).Packages(software.Aztec, running, tt.m)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("Packages(%s, %v) = %q, want %q", tt.running, tt.m, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestAdvisoryCheckEdgeCases(t *testing.T) {
 	// Go values, not API responses: combinations the recorded data does
 	// not contain.

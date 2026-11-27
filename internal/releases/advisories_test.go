@@ -255,6 +255,32 @@ func TestAdvisoriesOldCacheFormatIsRefetched(t *testing.T) {
 	}
 }
 
+func TestAdvisoriesCacheWithoutPackagesIsRefetched(t *testing.T) {
+	// x3f v0.2.0 cached advisories without package names and without
+	// "format". Kept, such a file would hide the names until the list
+	// changes on GitHub, since a 304 keeps the cached items.
+	f := newFakeAdvisories(t, geth, 0)
+	c := &clock{t: time.Date(2026, 11, 25, 12, 0, 0, 0, time.UTC)}
+	s := &Source{BaseURL: f.srv.URL, CacheDir: t.TempDir(), TTL: time.Hour, Now: c.Now}
+	path := filepath.Join(s.CacheDir, "github", "ethereum", "go-ethereum.advisories.json")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	old := `{"repo":"ethereum/go-ethereum","kind":"security advisories","etag":"W/\"adv1\"","fetched_at":"2026-11-25T11:50:00Z",` +
+		`"items":[{"ghsa_id":"GHSA-m6j8-rg6r-7mv8","vulnerabilities":[{"vulnerable_version_range":"<= 1.16.8","patched_versions":">= 1.16.9"}]}]}`
+	os.WriteFile(path, []byte(old), 0o644)
+
+	res, err := s.Advisories(context.Background(), geth)
+	if err != nil || res.Cached || len(res.Advisories) != 17 || f.requests.Load() != 1 {
+		t.Fatalf("cached=%v, %d advisories, err %v, %d requests", res.Cached, len(res.Advisories), err, f.requests.Load())
+	}
+	if got := f.lastINM.Load(); got != "" {
+		t.Errorf("If-None-Match = %q, want none: the old ETag belongs to an unusable entry", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), `"format":1`) || !strings.Contains(string(data), `"package":{"name":"github.com/ethereum/go-ethereum"}`) {
+		t.Errorf("rewritten cache file lacks the format or the package names (err %v)", err)
+	}
+}
+
 func TestWithoutWithdrawn(t *testing.T) {
 	withdrawn := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	got := withoutWithdrawn([]Advisory{{GHSAID: "a"}, {GHSAID: "b", WithdrawnAt: &withdrawn}, {GHSAID: "c"}})

@@ -74,6 +74,10 @@ type list struct {
 	// maxPages is how many pages are fetched by following the Link
 	// header. Releases need only the newest page.
 	maxPages int
+	// format is the version of the cached items. The cache stores the
+	// decoded items, so a field added to them is missing in older cache
+	// files; raising format makes those count as missing.
+	format int
 }
 
 var (
@@ -84,6 +88,8 @@ var (
 	advisoriesList = list{
 		kind: "security advisories", path: "security-advisories?state=published&per_page=100",
 		file: ".advisories.json", maxPages: 10,
+		// 1: vulnerabilities carry the package name (x3f v0.3.0).
+		format: 1,
 	}
 )
 
@@ -98,10 +104,12 @@ type listResult[T any] struct {
 
 // cacheEntry is the on-disk format. Kind guards against reading one list as
 // another, and makes cache files from x3f v0.1.0 (which had no kind) count
-// as missing: they are simply fetched again.
+// as missing: they are simply fetched again. Format does the same for
+// files written before the list's current format (see list.format).
 type cacheEntry[T any] struct {
 	Repo      string    `json:"repo"`
 	Kind      string    `json:"kind"`
+	Format    int       `json:"format,omitempty"`
 	ETag      string    `json:"etag,omitempty"`
 	FetchedAt time.Time `json:"fetched_at"`
 	Items     []T       `json:"items"`
@@ -155,7 +163,7 @@ func getList[T any](ctx context.Context, s *Source, repo software.Repo, l list, 
 		writeCache(s, repo, l, cached)
 		return listResult[T]{Items: cached.Items, FetchedAt: now}, nil
 	default:
-		entry := cacheEntry[T]{Repo: repo.String(), Kind: l.kind, ETag: newETag, FetchedAt: now, Items: fresh}
+		entry := cacheEntry[T]{Repo: repo.String(), Kind: l.kind, Format: l.format, ETag: newETag, FetchedAt: now, Items: fresh}
 		writeCache(s, repo, l, entry)
 		return listResult[T]{Items: fresh, FetchedAt: now}, nil
 	}
@@ -312,7 +320,7 @@ func readCache[T any](s *Source, repo software.Repo, l list) (cacheEntry[T], boo
 		return cacheEntry[T]{}, false
 	}
 	var e cacheEntry[T]
-	if err := json.Unmarshal(data, &e); err != nil || e.Repo != repo.String() || e.Kind != l.kind {
+	if err := json.Unmarshal(data, &e); err != nil || e.Repo != repo.String() || e.Kind != l.kind || e.Format != l.format {
 		return cacheEntry[T]{}, false
 	}
 	return e, true

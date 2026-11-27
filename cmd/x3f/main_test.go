@@ -405,6 +405,7 @@ nodes:
 		// for 6.x yet, so it is a note; GHSA-778c-2h5c-8r96 names its
 		// range in free text.
 		"NOTE  aztec-1 advisories: Aztec 6.0.0 is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: ",
+		`…"; packages @aztec/bb.js, @aztec-foundation/bb.js, barretenberg-rs); https://github.com/AztecProtocol/aztec-packages/security/advisories`,
 		"NOTE  aztec-1 advisories: cannot tell whether Aztec 6.0.0 is affected by GHSA-778c-2h5c-8r96",
 		"CRIT  aztec-down version: unreachable: getNodeInfo: connection failed",
 		"Status: CRIT (1 OK, 1 WARN, 1 CRIT)",
@@ -482,8 +483,8 @@ nodes:
 	}
 	for _, want := range []string{
 		`NOTE  aztec-1 advisories: 2 ignored advisories for Aztec 6.0.0 (ignore_advisories): GHSA-`,
-		`reason "no native verifier"`,
-		`reason "not on v4"`,
+		`; packages @aztec/bb.js, @aztec-foundation/bb.js, barretenberg-rs), reason "no native verifier"`,
+		`; package @aztec/archiver @aztec/stdlib), reason "not on v4"`,
 		"NOTE  aztec-1 ignore_advisories: GHSA-mp5j-q856-vvx7 is not a published advisory of Aztec; check the ID for a typo",
 	} {
 		if !strings.Contains(got, want) {

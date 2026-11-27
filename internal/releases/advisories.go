@@ -22,8 +22,8 @@ type Advisory struct {
 	PublishedAt time.Time  `json:"published_at"`
 	WithdrawnAt *time.Time `json:"withdrawn_at,omitempty"`
 	// Vulnerabilities name the affected and patched versions. The package
-	// name is ignored: every repository x3f reads uses its own release
-	// versions there, whatever it calls the package.
+	// name does not change the version check: every repository x3f reads
+	// uses its own release versions there, whatever it calls the package.
 	Vulnerabilities []AdvisoryVulnerability `json:"vulnerabilities"`
 }
 
@@ -31,8 +31,15 @@ type Advisory struct {
 // fields are free text written by the repository maintainers; see
 // ParseRange for the spellings x3f understands.
 type AdvisoryVulnerability struct {
-	VulnerableVersionRange string `json:"vulnerable_version_range"`
-	PatchedVersions        string `json:"patched_versions"`
+	Package                AdvisoryPackage `json:"package"`
+	VulnerableVersionRange string          `json:"vulnerable_version_range"`
+	PatchedVersions        string          `json:"patched_versions"`
+}
+
+// AdvisoryPackage is the package of a vulnerability entry.
+type AdvisoryPackage struct {
+	// Name is free text from the maintainers, e.g. "@aztec/bb.js".
+	Name string `json:"name"`
 }
 
 // AdvisoryResult is the advisory list of one repository; the fields mean

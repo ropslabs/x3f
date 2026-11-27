@@ -2,6 +2,7 @@ package releases
 
 import (
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/ropslabs/x3f/internal/software"
@@ -172,6 +173,20 @@ func (a Advisory) Check(client software.Name, running Version) (m Match, fix Ver
 	default:
 		return NotAffected, Version{}, false
 	}
+}
+
+// Packages returns the names of the packages whose entries match running
+// as m (Affected or Unclear), each once, in the order of the advisory.
+// Entries without a package name are left out.
+func (a Advisory) Packages(client software.Name, running Version, m Match) []string {
+	var names []string
+	for _, e := range a.Vulnerabilities {
+		entryM, _, _ := checkEntry(client, e, running)
+		if entryM == m && e.Package.Name != "" && !slices.Contains(names, e.Package.Name) {
+			names = append(names, e.Package.Name)
+		}
+	}
+	return names
 }
 
 // checkEntry checks one vulnerability entry; see Check.

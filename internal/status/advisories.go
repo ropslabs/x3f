@@ -71,6 +71,9 @@ type affectedBy struct {
 	adv      releases.Advisory
 	fix      releases.Version
 	released bool // a fix exists and is released
+	// packages are the affected (or, if unclear, the undecided) packages,
+	// for software whose findings name them.
+	packages []string
 	// ignore is the config entry, for advisories that are ignored.
 	ignore config.AdvisoryIgnore
 }
@@ -114,10 +117,14 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 	var expired []config.AdvisoryIgnore
 	for _, a := range in.Advisories.Advisories {
 		m, fix, hasFix := a.Check(v.Name, running)
+		var packages []string
+		if software.ListsPackages(v.Name) && m != releases.NotAffected {
+			packages = a.Packages(v.Name, running, m)
+		}
 		if e, ok := ignore[strings.ToLower(a.GHSAID)]; ok {
 			if !e.Expired(in.Now) {
 				if m != releases.NotAffected {
-					ignored = append(ignored, affectedBy{adv: a, ignore: e})
+					ignored = append(ignored, affectedBy{adv: a, packages: packages, ignore: e})
 				}
 				continue
 			}
@@ -125,10 +132,10 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 		}
 		switch m {
 		case releases.Unclear:
-			unclear = append(unclear, affectedBy{adv: a})
+			unclear = append(unclear, affectedBy{adv: a, packages: packages})
 		case releases.Affected:
 			released := hasFix && (in.Releases == nil || releases.ReleasedAtLeast(v.Name, in.Releases.Releases, fix))
-			ab := affectedBy{adv: a, fix: fix, released: released}
+			ab := affectedBy{adv: a, fix: fix, released: released, packages: packages}
 			if released {
 				fixed = append(fixed, ab)
 			} else {
@@ -183,7 +190,7 @@ func AssessAdvisories(in AdvisoryInput) AdvisoryResult {
 	}
 	for _, u := range unclear {
 		r.add(OK, "cannot tell whether %s is affected by %s, check it yourself (affected versions %s, patched %s)",
-			name, describeAdvisory(u.adv), quoteRanges(u.adv, false), quoteRanges(u.adv, true))
+			name, describeAdvisory(u), quoteRanges(u.adv, false), quoteRanges(u.adv, true))
 	}
 
 	all := append(slices.Clone(fixed), unfixed...)
@@ -272,7 +279,7 @@ func listAdvisories(as []affectedBy) string {
 	})
 	var parts []string
 	for _, a := range sorted[:min(len(sorted), MaxListedAdvisories)] {
-		parts = append(parts, describeAdvisory(a.adv))
+		parts = append(parts, describeAdvisory(a))
 	}
 	s := strings.Join(parts, ", ")
 	if rest := len(sorted) - MaxListedAdvisories; rest > 0 {
@@ -294,7 +301,7 @@ func countIgnored(n int) string {
 func listIgnored(as []affectedBy) string {
 	var parts []string
 	for _, a := range as {
-		s := fmt.Sprintf("%s, reason %q", describeAdvisory(a.adv), clean(a.ignore.Reason, 80))
+		s := fmt.Sprintf("%s, reason %q", describeAdvisory(a), clean(a.ignore.Reason, 80))
 		if !a.ignore.Expires.IsZero() {
 			s += ", until " + a.ignore.Expires.Format(time.DateOnly)
 		}
@@ -342,13 +349,41 @@ func orList(names []string) string {
 }
 
 // describeAdvisory renders e.g.
-// `GHSA-2gjw-fg97-vg3r (high, CVE-2026-26314: "DoS via malicious p2p message")`.
-func describeAdvisory(a releases.Advisory) string {
+// `GHSA-2gjw-fg97-vg3r (high, CVE-2026-26314: "DoS via malicious p2p message")`,
+// with the packages if there are any:
+// `GHSA-73xc-j27q-wg75 (medium: "UltraHonk …"; packages @aztec/bb.js, barretenberg-rs)`.
+func describeAdvisory(ab affectedBy) string {
+	a := ab.adv
 	meta := severityName(severityRank(a.Severity))
 	if a.CVEID != "" {
 		meta += ", " + clean(a.CVEID, 30)
 	}
-	return fmt.Sprintf("%s (%s: %q)", clean(a.GHSAID, 30), meta, clean(a.Summary, 70))
+	s := fmt.Sprintf("%s (%s: %q", clean(a.GHSAID, 30), meta, clean(a.Summary, 70))
+	if len(ab.packages) > 0 {
+		s += "; " + listPackages(ab.packages)
+	}
+	return s + ")"
+}
+
+// MaxListedPackages is how many packages describeAdvisory names; the rest
+// are counted.
+const MaxListedPackages = 3
+
+// listPackages renders "package a" or "packages a, b and 2 more". Package
+// names are free text from GitHub and are cleaned.
+func listPackages(names []string) string {
+	var parts []string
+	for _, n := range names[:min(len(names), MaxListedPackages)] {
+		parts = append(parts, clean(n, 40))
+	}
+	s := strings.Join(parts, ", ")
+	if rest := len(names) - MaxListedPackages; rest > 0 {
+		s += fmt.Sprintf(" and %d more", rest)
+	}
+	if len(names) == 1 {
+		return "package " + s
+	}
+	return "packages " + s
 }
 
 // quoteRanges lists the ranges (or patched versions) of all entries.

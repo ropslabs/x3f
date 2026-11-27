@@ -117,6 +117,17 @@ var repos = map[Name]Repo{
 	Aztec:      {"AztecProtocol", "aztec-packages"},
 }
 
+// listsPackages marks software whose repository publishes several packages
+// under one version. Its advisories name the affected packages, and a
+// finding shows them, so the operator can tell whether the node uses one.
+var listsPackages = map[Name]bool{
+	Aztec: true,
+}
+
+// ListsPackages reports whether advisory findings for n name the affected
+// packages.
+func ListsPackages(n Name) bool { return listsPackages[n] }
+
 // RepoFor returns the GitHub repository of a piece of software.
 func RepoFor(c Name) (Repo, bool) {
 	r, ok := repos[c]
