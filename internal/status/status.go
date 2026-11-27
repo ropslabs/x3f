@@ -195,7 +195,7 @@ func AssessVersion(in VersionInput) Assessment {
 	if missing.PublishedAt.IsZero() {
 		// GitHub sets published_at for every published release; be safe
 		// anyway instead of computing an absurd age.
-		a.add(Warn, "%s outdated: latest %s; release date of %s unknown", name, latest, missing.Tag)
+		a.add(Warn, "%s outdated: latest %s; release date of %s unknown", name, latest, plainTag(missing.Tag))
 		return a
 	}
 	behind := in.Now.Sub(missing.PublishedAt)
@@ -211,8 +211,18 @@ func AssessVersion(in VersionInput) Assessment {
 		return a
 	}
 	a.add(level, "%s outdated: latest %s; first newer release %s published %s ago (grace period %s)",
-		name, latest, missing.Tag, days(behind), days(in.Grace))
+		name, latest, plainTag(missing.Tag), days(behind), days(in.Grace))
 	return a
+}
+
+// plainTag drops the "v" of a release tag ("v1.17.10" becomes "1.17.10"),
+// so that a version reads the same everywhere in the output. Tags without
+// it, such as Besu's "26.11.2", stay as they are.
+func plainTag(tag string) string {
+	if len(tag) > 1 && (tag[0] == 'v' || tag[0] == 'V') {
+		return tag[1:]
+	}
+	return tag
 }
 
 // sameNumbers reports whether a and b have the same MAJOR.MINOR.PATCH.

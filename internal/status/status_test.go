@@ -61,19 +61,19 @@ func TestAssessVersion(t *testing.T) {
 			wantLevel: OK,
 		},
 		{
-			// For 1.17.8 the first newer release is v1.17.9, published
+			// For 1.17.8 the first newer release is 1.17.9 (tag v1.17.9), published
 			// 33 days and some hours before now.
 			name:      "outdated beyond grace",
 			in:        VersionInput{Version: geth("Geth/v1.17.8-stable-aaaaaaaa/linux-amd64/go1.27.3"), Releases: fresh},
 			wantLevel: Crit,
-			wantMsgs:  []string{"Geth 1.17.8 outdated: latest 1.17.10; first newer release v1.17.9 published 33 days ago (grace period 30 days)"},
+			wantMsgs:  []string{"Geth 1.17.8 outdated: latest 1.17.10; first newer release 1.17.9 published 33 days ago (grace period 30 days)"},
 		},
 		{
 			name: "outdated within grace",
 			in: VersionInput{Version: geth("Geth/v1.17.9-stable-aaaaaaaa/linux-amd64/go1.27.3"), Releases: fresh,
 				Now: time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)},
 			wantLevel: Warn,
-			wantMsgs:  []string{"first newer release v1.17.10 published 6 days ago"},
+			wantMsgs:  []string{"first newer release 1.17.10 published 6 days ago"},
 		},
 		{
 			name:      "dev build ahead of latest",
@@ -113,13 +113,13 @@ func TestAssessVersion(t *testing.T) {
 				}, FetchedAt: now}},
 			wantLevel: Crit,
 			wantMsgs: []string{`Lighthouse 8.2.0 is a pre-release ("rc.1")`,
-				"Lighthouse 8.2.0 outdated: latest 8.3.3; first newer release v8.2.1 published 40 days ago"},
+				"Lighthouse 8.2.0 outdated: latest 8.3.3; first newer release 8.2.1 published 40 days ago"},
 		},
 		{
 			name:      "release without date",
 			in:        VersionInput{Version: geth("Lighthouse/v8.3.2-67da032/x86_64-linux"), Releases: &releases.Result{Releases: []releases.Release{{Tag: "v8.3.3"}}, FetchedAt: now}},
 			wantLevel: Warn,
-			wantMsgs:  []string{"release date of v8.3.3 unknown"},
+			wantMsgs:  []string{"release date of 8.3.3 unknown"},
 		},
 		{
 			name:      "unknown suffix",
@@ -326,5 +326,20 @@ func TestLevelText(t *testing.T) {
 	var l Level
 	if err := l.UnmarshalText([]byte("warn")); err == nil {
 		t.Error("lowercase level accepted")
+	}
+}
+
+func TestPlainTag(t *testing.T) {
+	for _, tc := range []struct{ tag, want string }{
+		{"v1.17.10", "1.17.10"},
+		{"V1.17.10", "1.17.10"},
+		{"v8.4.0-rc.0", "8.4.0-rc.0"},
+		{"26.11.2", "26.11.2"}, // Besu tags have no "v"
+		{"v", "v"},
+		{"", ""},
+	} {
+		if got := plainTag(tc.tag); got != tc.want {
+			t.Errorf("plainTag(%q) = %q, want %q", tc.tag, got, tc.want)
+		}
 	}
 }
