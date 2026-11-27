@@ -37,7 +37,11 @@ as test data for the Aztec suffix rules.
 
 `aztec-labs-eng_aztec-node.json` was recorded the same way on 2026-11-27 at
 12:03 UTC: all 3 releases, `v6.1.0` (2026-11-24), `v6.0.0` and the flagged
-pre-release `v6.0.0-rc.1`. Source of the repository change: the operator
+pre-release `v6.0.0-rc.1`. Unlike the other files it also keeps `html_url`
+and the release notes (`body`, unchanged), because x3f looks for the word
+"security" in them: the notes of `v6.1.0` ("v6.1.0 is a security release")
+and `v6.0.0` (heading "Security & correctness") contain it, those of
+`v6.0.0-rc.1` do not. Source of the repository change: the operator
 changelog of v6 (`docs/docs-operate/operators/reference/changelog/v6.md` in
 aztec-labs-eng/aztec-node at commit 1b6de149f4, table "Source repository").
 

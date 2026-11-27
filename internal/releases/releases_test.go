@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -247,5 +249,77 @@ func TestNewestKnown(t *testing.T) {
 	}
 	if NewerThanAll(software.Lighthouse, nil, Version{Major: 1}) {
 		t.Error("NewerThanAll with no data must be false")
+	}
+}
+
+func TestReleaseMentionsSecurity(t *testing.T) {
+	// Recorded: v6.1.0 is a security release ("v6.1.0 is a security
+	// release"), v6.0.0 has a heading "## Security & correctness", the
+	// notes of v6.0.0-rc.1 do not contain the word.
+	rels := loadFixture(t, software.Repo{Owner: "aztec-labs-eng", Name: "aztec-node"})
+	want := map[string]bool{"v6.1.0": true, "v6.0.0": true, "v6.0.0-rc.1": false}
+	for _, r := range rels {
+		if r.MentionsSecurity != want[r.Tag] {
+			t.Errorf("%s: MentionsSecurity = %v, want %v", r.Tag, r.MentionsSecurity, want[r.Tag])
+		}
+		if r.HTMLURL != "https://github.com/aztec-labs-eng/aztec-node/releases/tag/"+r.Tag {
+			t.Errorf("%s: HTMLURL = %q", r.Tag, r.HTMLURL)
+		}
+	}
+
+	// The cache keeps the result, not the release notes.
+	data, err := json.Marshal(rels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"body"`) || !strings.Contains(string(data), `"mentions_security":true`) {
+		t.Errorf("cached form: %s", data)
+	}
+	var again []Release
+	if err := json.Unmarshal(data, &again); err != nil || !slices.Equal(again, rels) {
+		t.Errorf("round trip: %v, %+v", err, again)
+	}
+
+	// Synthetic: the word, in any case, but not as part of another word.
+	for body, want := range map[string]bool{
+		"Fixes a SECURITY issue.":        true,
+		"## Security & correctness":      true,
+		"see security/advisories":        true,
+		"No insecurity here.":            false,
+		"securityfix and cybersecurity.": false,
+		"":                               false,
+	} {
+		var r Release
+		raw, _ := json.Marshal(map[string]string{"tag_name": "v1.0.0", "body": body})
+		if err := json.Unmarshal(raw, &r); err != nil || r.MentionsSecurity != want {
+			t.Errorf("body %q: MentionsSecurity = %v (err %v), want %v", body, r.MentionsSecurity, err, want)
+		}
+	}
+}
+
+func TestMissing(t *testing.T) {
+	rels := loadFixture(t, software.Repo{Owner: "aztec-labs-eng", Name: "aztec-node"})
+	tests := []struct {
+		running string
+		want    []string
+	}{
+		{"5.2.0", []string{"v6.0.0", "v6.1.0"}},
+		{"6.0.0-rc.1", []string{"v6.0.0", "v6.1.0"}}, // the pre-release v6.0.0-rc.1 is not stable
+		{"6.0.0", []string{"v6.1.0"}},
+		{"6.1.0", nil},
+		{"6.2.0", nil},
+	}
+	for _, tt := range tests {
+		running, ok := ParseVersion(tt.running)
+		if !ok {
+			t.Fatalf("bad version %q", tt.running)
+		}
+		var got []string
+		for _, r := range Missing(software.Aztec, rels, running) {
+			got = append(got, r.Tag)
+		}
+		if !slices.Equal(got, tt.want) {
+			t.Errorf("Missing(%s) = %q, want %q", tt.running, got, tt.want)
+		}
 	}
 }

@@ -84,6 +84,8 @@ var (
 	releasesList = list{
 		kind: "releases", path: "releases?per_page=100",
 		file: ".json", maxPages: 1,
+		// 1: releases carry html_url and mentions_security (x3f v0.3.0).
+		format: 1,
 	}
 	advisoriesList = list{
 		kind: "security advisories", path: "security-advisories?state=published&per_page=100",

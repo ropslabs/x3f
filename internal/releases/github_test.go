@@ -271,3 +271,29 @@ func TestRefreshIgnoresTTL(t *testing.T) {
 		t.Errorf("refresh If-None-Match = %q, want the cached ETag", got)
 	}
 }
+
+func TestReleaseCacheWithoutFormatIsRefetched(t *testing.T) {
+	// x3f v0.2.0 cached releases with "kind" but without "format", and
+	// without html_url and mentions_security. Kept, such a file would hide
+	// security mentions until the release list changes on GitHub, since a
+	// 304 keeps the cached items.
+	f := newFakeGitHub(t)
+	c := &clock{t: time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)}
+	s := newSource(t, f, c)
+	path := filepath.Join(s.CacheDir, "github", "ethereum", "go-ethereum.json")
+	os.MkdirAll(filepath.Dir(path), 0o755)
+	old := `{"repo":"ethereum/go-ethereum","kind":"releases","etag":"W/\"abc123\"","fetched_at":"2026-11-24T11:50:00Z","items":[{"tag_name":"v1.17.10"}]}`
+	os.WriteFile(path, []byte(old), 0o644)
+
+	res, err := s.Releases(context.Background(), geth)
+	if err != nil || res.Cached || len(res.Releases) != 100 || f.requests.Load() != 1 {
+		t.Fatalf("cached=%v, %d releases, err %v, %d requests", res.Cached, len(res.Releases), err, f.requests.Load())
+	}
+	if got := f.lastINM.Load(); got != "" {
+		t.Errorf("If-None-Match = %q, want none: the old ETag belongs to an unusable entry", got)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(data), `"format":1`) {
+		t.Errorf("rewritten cache file lacks the format (err %v)", err)
+	}
+}

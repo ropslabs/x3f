@@ -1,6 +1,9 @@
 package releases
 
 import (
+	"encoding/json"
+	"regexp"
+	"slices"
 	"time"
 
 	"github.com/ropslabs/x3f/internal/software"
@@ -12,6 +15,36 @@ type Release struct {
 	Prerelease  bool      `json:"prerelease"`
 	Draft       bool      `json:"draft"`
 	PublishedAt time.Time `json:"published_at"`
+	// HTMLURL is the release page on GitHub.
+	HTMLURL string `json:"html_url,omitempty"`
+	// MentionsSecurity is set if the release notes contain the word
+	// "security" (any case, as a whole word). It is decided when the
+	// release is read from GitHub; the cache keeps only the result, not
+	// the release notes.
+	MentionsSecurity bool `json:"mentions_security,omitempty"`
+}
+
+// securityRe matches the word "security" in release notes, e.g. in
+// "a security release" or a heading "## Security & correctness".
+var securityRe = regexp.MustCompile(`(?i)\bsecurity\b`)
+
+// UnmarshalJSON implements json.Unmarshaler: it reads a release from the
+// GitHub API, whose release notes are in "body", or from the cache, which
+// has mentions_security instead.
+func (r *Release) UnmarshalJSON(data []byte) error {
+	// plain has the fields of Release but not its methods, so decoding
+	// into it does not call this method again.
+	type plain Release
+	var aux struct {
+		plain
+		Body string `json:"body"`
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	*r = Release(aux.plain)
+	r.MentionsSecurity = r.MentionsSecurity || securityRe.MatchString(aux.Body)
+	return nil
 }
 
 // stable reports whether r counts as a stable release of client: not a
@@ -78,6 +111,27 @@ func ReleasedAtLeast(client software.Name, rels []Release, v Version) bool {
 		}
 	}
 	return false
+}
+
+// Missing returns the stable releases newer than running, lowest version
+// first.
+func Missing(client software.Name, rels []Release, running Version) []Release {
+	type found struct {
+		r Release
+		v Version
+	}
+	var out []found
+	for _, r := range rels {
+		if v, ok := stable(client, r); ok && Compare(client, v, running) > 0 {
+			out = append(out, found{r, v})
+		}
+	}
+	slices.SortStableFunc(out, func(a, b found) int { return Compare(client, a.v, b.v) })
+	rs := make([]Release, len(out))
+	for i, f := range out {
+		rs[i] = f.r
+	}
+	return rs
 }
 
 // FirstMissing returns the earliest published stable release that is newer

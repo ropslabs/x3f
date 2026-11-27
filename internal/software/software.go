@@ -139,6 +139,18 @@ var listsPackages = map[Name]bool{
 // packages.
 func ListsPackages(n Name) bool { return listsPackages[n] }
 
+// securityNotes marks software whose version findings point to missing
+// releases whose release notes mention "security". The Aztec node
+// published a security release (aztec-node v6.1.0) without a security
+// advisory, so the advisory check alone would not show it.
+var securityNotes = map[Name]bool{
+	Aztec: true,
+}
+
+// SecurityNotes reports whether version findings for n note missing
+// releases whose release notes mention "security".
+func SecurityNotes(n Name) bool { return securityNotes[n] }
+
 // ReleaseRepo returns the GitHub repository whose releases a piece of
 // software is compared with.
 func ReleaseRepo(c Name) (Repo, bool) {

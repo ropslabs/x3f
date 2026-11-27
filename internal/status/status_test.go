@@ -3,6 +3,7 @@ package status
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -342,6 +343,104 @@ func TestPlainTag(t *testing.T) {
 	} {
 		if got := plainTag(tc.tag); got != tc.want {
 			t.Errorf("plainTag(%q) = %q, want %q", tc.tag, got, tc.want)
+		}
+	}
+}
+
+func TestAssessVersionSecurityNote(t *testing.T) {
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	grace := 30 * 24 * time.Hour
+	// Recorded aztec-node releases: the notes of v6.1.0 and v6.0.0
+	// mention "security", those of v6.0.0-rc.1 do not.
+	node := recorded[releases.Release](t, "", "aztec-labs-eng_aztec-node.json")
+	const url = "https://github.com/aztec-labs-eng/aztec-node/releases/tag/"
+	at := func(s string) time.Time { tm, _ := time.Parse(time.DateOnly, s); return tm }
+	var many []releases.Release
+	for i := 1; i <= 5; i++ {
+		tag := fmt.Sprintf("v6.%d.0", i)
+		many = append(many, releases.Release{Tag: tag, PublishedAt: at("2026-11-01"), HTMLURL: url + tag, MentionsSecurity: true})
+	}
+	many = append(many, releases.Release{Tag: "v6.6.0", PublishedAt: at("2026-11-02"), HTMLURL: url + "v6.6.0"})
+
+	tests := []struct {
+		name    string
+		client  software.Name
+		version string
+		rels    []releases.Release
+		err     error
+		want    string // the note; "" means none
+	}{
+		{"one missing release", software.Aztec, "6.0.0", node, nil,
+			`release notes of 6.1.0 mention "security", read them: ` + url + "v6.1.0"},
+		{"two missing releases", software.Aztec, "5.2.0", node, nil,
+			`release notes of 6.0.0 and 6.1.0 mention "security", read them: ` + url + "v6.0.0, " + url + "v6.1.0"},
+		{"pre-release of the first release", software.Aztec, "6.0.0-rc.1", node, nil,
+			`release notes of 6.0.0 and 6.1.0 mention "security", read them: ` + url + "v6.0.0, " + url + "v6.1.0"},
+		{"up to date", software.Aztec, "6.1.0", node, nil, ""},
+		{"newest three named", software.Aztec, "6.0.0", many, nil,
+			`release notes of 6.3.0, 6.4.0 and 6.5.0 (and 2 older) mention "security", read them: ` + url + "v6.3.0, " + url + "v6.4.0, " + url + "v6.5.0"},
+		{"version query failed", software.Aztec, "6.0.0", node, errors.New("boom"), ""},
+		// A link that is not a plain GitHub URL is left out.
+		{"link not on GitHub", software.Aztec, "6.0.0", []releases.Release{
+			{Tag: "v6.1.0", PublishedAt: at("2026-11-24"), HTMLURL: "https://evil.example/x", MentionsSecurity: true},
+		}, nil, `release notes of 6.1.0 mention "security", read them`},
+		{"some links left out", software.Aztec, "6.0.0", []releases.Release{
+			{Tag: "v6.1.0", PublishedAt: at("2026-11-24"), HTMLURL: "https://github.com.evil.example/x", MentionsSecurity: true},
+			{Tag: "v6.2.0", PublishedAt: at("2026-11-25"), HTMLURL: url + "v6.2.0", MentionsSecurity: true},
+		}, nil, `release notes of 6.1.0 and 6.2.0 mention "security", read them: ` + url + "v6.2.0"},
+		// Only software with software.SecurityNotes gets the note.
+		{"not for Ethereum clients", software.Lighthouse, "8.3.2", []releases.Release{
+			{Tag: "v8.3.3", PublishedAt: at("2026-11-09"), HTMLURL: "https://example.invalid", MentionsSecurity: true},
+		}, nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			v, _ := releases.ParseVersion(tt.version)
+			in := VersionInput{
+				Version:  software.Reported{Raw: tt.version, Name: tt.client, Version: fmt.Sprintf("%d.%d.%d", v.Major, v.Minor, v.Patch), Suffix: v.Suffix},
+				Err:      tt.err,
+				Releases: &releases.Result{Releases: tt.rels, FetchedAt: now},
+				Now:      now, Grace: grace,
+			}
+			got := AssessVersion(in)
+			base := assessVersion(in)
+			// The note is the only difference and never changes the level.
+			if got.Level != base.Level {
+				t.Errorf("level %v, without the note %v", got.Level, base.Level)
+			}
+			var notes []string
+			for _, f := range got.Findings[len(base.Findings):] {
+				if f.Level != OK {
+					t.Errorf("note has level %v", f.Level)
+				}
+				notes = append(notes, f.Message)
+			}
+			switch {
+			case tt.want == "" && len(notes) > 0:
+				t.Errorf("unexpected note %q", notes)
+			case tt.want != "" && (len(notes) != 1 || notes[0] != tt.want):
+				t.Errorf("notes %q\nwant %q", notes, tt.want)
+			}
+		})
+	}
+}
+
+func TestReleaseLink(t *testing.T) {
+	long := "https://github.com/aztec-labs-eng/aztec-node/releases/tag/v" + strings.Repeat("1", 200)
+	for u, want := range map[string]bool{
+		"https://github.com/aztec-labs-eng/aztec-node/releases/tag/v6.1.0": true,
+		"":                                      false,
+		"http://github.com/a/b/releases/tag/v1": false, // not https
+		"https://github.com.evil.example/a":     false, // another host
+		"https://evil.example/https://github.com/": false,
+		"https://github.com/a/b\x1b[31m":           false, // control character
+		"https://github.com/a/b\u202e/tag":         false, // invisible format character
+		"https://github.com/a/b c":                 false, // whitespace
+		long:                                       false, // would be cut
+	} {
+		got, ok := releaseLink(u)
+		if ok != want || (ok && got != u) {
+			t.Errorf("releaseLink(%q) = %q, %v; want %v", u, got, ok, want)
 		}
 	}
 }

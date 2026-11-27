@@ -248,6 +248,7 @@ WARN    aztec-1  Aztec 6.0.0 -> 6.1.0  1 (medium)
 
 Findings:
   WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 3 days ago (grace period 30 days)
+  NOTE  aztec-1 version: release notes of 6.1.0 mention "security", read them: https://github.com/aztec-labs-eng/aztec-node/releases/tag/v6.1.0
   NOTE  aztec-1 advisories: Aztec 6.0.0 is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: "UltraHonk native verifier throws or aborts on a recursive pairing acc…"; packages @aztec/bb.js, @aztec-foundation/bb.js, barretenberg-rs); https://github.com/AztecProtocol/aztec-packages/security/advisories
   NOTE  aztec-1 advisories: cannot tell whether Aztec 6.0.0 is affected by GHSA-778c-2h5c-8r96 (low: "Checkpoint with over 72 blocks pushed via the escape hatch and proven…"; package @aztec/archiver @aztec/stdlib), check it yourself (affected versions "current Ignition mainnet release (v4 ta…", patched "> v5.0.0-rc.1")
 
@@ -260,10 +261,12 @@ The [status rules](#status-rules) for version and advisories are the same as for
 
 - **Releases** come from [`aztec-labs-eng/aztec-node`](https://github.com/aztec-labs-eng/aztec-node/releases), where the node is released since v6. The aztec-packages monorepo publishes releases with the same numbers for Barretenberg, bb.js and the L1 contracts, sometimes days earlier; they are not node releases. Only a plain version such as `6.1.0` is a stable release. `rc.N` is a pre-release; `nightly`, `dev` and `commit` builds are dev builds; any other suffix (for example `devnet` or `private`) is unrecognized. All of them are yellow on a node and never count as the latest release, even where GitHub does not mark them as pre-releases.
 - **Advisories** come from [`AztecProtocol/aztec-packages`](https://github.com/AztecProtocol/aztec-packages/security/advisories); aztec-node publishes none of its own. They concern packages such as Barretenberg and bb.js, which the node ships. aztec-packages releases many packages under one version, and an advisory counts if any of its packages is affected. The finding names the affected packages, so you can judge whether the node uses them; if not, add the advisory to [`ignore_advisories`](#ignoring-an-advisory). Whether a fix is released is checked against the node releases.
+- **Security mentions:** if the release notes of a newer release the node does not run contain the word "security", a note names those releases with links, for example `release notes of 6.1.0 mention "security", read them: https://github.com/aztec-labs-eng/aztec-node/releases/tag/v6.1.0`. The status does not change: the word alone does not say how urgent a release is.
 
 Known limitations:
 
 - **Version and advisories only.** Network, sync status and upgrade readiness of Aztec nodes are not checked yet.
+- **Security releases without an advisory are not recognized as urgent.** aztec-node v6.1.0 is a security release, but no GitHub advisory was published for it, so it counts like any other release: yellow within the grace period. x3f adds a note when the release notes of a missing newer release contain the word "security", but the word alone does not change the status.
 - **Node releases before v6 are not in aztec-node.** For a node older than 6.0.0, "first newer release" is 6.0.0, not the real successor (such as 5.2.1). The status is still right: v6 is a new network, and such a node is far beyond the grace period.
 
 ### Telegram notifications

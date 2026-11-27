@@ -404,7 +404,9 @@ nodes:
 	for _, want := range []string{
 		// The node release of aztec-node (2026-11-24 08:36 UTC), not the
 		// aztec-packages release of the same number five days earlier.
-		"WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published less than 1 day ago (grace period 30 days)",
+		"WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published less than 1 day ago (grace period 30 days)\n" +
+			// Real data: v6.1.0 is a security release without an advisory.
+			`  NOTE  aztec-1 version: release notes of 6.1.0 mention "security", read them: https://github.com/aztec-labs-eng/aztec-node/releases/tag/v6.1.0` + "\n",
 		// Real data: GHSA-73xc-j27q-wg75 (medium) has no fixed release
 		// for 6.x yet, so it is a note; GHSA-778c-2h5c-8r96 names its
 		// range in free text.

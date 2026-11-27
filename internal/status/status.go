@@ -22,7 +22,9 @@ package status
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/httpjson"
@@ -112,8 +114,85 @@ type VersionInput struct {
 	Grace       time.Duration
 }
 
-// AssessVersion applies the version rules.
+// AssessVersion applies the version rules. For software with
+// software.SecurityNotes, a note names the missing releases whose release
+// notes mention "security"; it never changes the level, since the word
+// alone does not tell how urgent a release is.
 func AssessVersion(in VersionInput) Assessment {
+	a := assessVersion(in)
+	if note, ok := securityNote(in); ok {
+		a.add(OK, "%s", note)
+	}
+	return a
+}
+
+// MaxListedReleases is how many releases the security note names; the rest
+// are counted.
+const MaxListedReleases = 3
+
+// securityNote returns the note about missing releases whose release notes
+// mention "security": the newest MaxListedReleases by version, with links.
+func securityNote(in VersionInput) (string, bool) {
+	v := in.Version
+	if in.Err != nil || in.Releases == nil || !software.SecurityNotes(v.Name) {
+		return "", false
+	}
+	running, ok := releases.ParseVersion(v.Version)
+	if !ok {
+		return "", false
+	}
+	running.Suffix = v.Suffix
+	var flagged []releases.Release
+	for _, r := range releases.Missing(v.Name, in.Releases.Releases, running) {
+		if r.MentionsSecurity {
+			flagged = append(flagged, r)
+		}
+	}
+	if len(flagged) == 0 {
+		return "", false
+	}
+	// The newest releases matter most: they are the ones to install.
+	rest := max(0, len(flagged)-MaxListedReleases)
+	listed := flagged[rest:]
+	var tags, urls []string
+	for _, r := range listed {
+		tags = append(tags, clean(plainTag(r.Tag), 30))
+		if u, ok := releaseLink(r.HTMLURL); ok {
+			urls = append(urls, u)
+		}
+	}
+	s := "release notes of " + andList(tags)
+	if rest > 0 {
+		s += fmt.Sprintf(" (and %d older)", rest)
+	}
+	s += ` mention "security", read them`
+	if len(urls) > 0 {
+		s += ": " + strings.Join(urls, ", ")
+	}
+	return s, true
+}
+
+// releaseLink returns a release page URL from GitHub if it is safe to
+// print: it must start with https://github.com/ and be unchanged by clean,
+// so it holds no control or invisible characters, no whitespace and is not
+// cut short. Anything else is left out rather than shown as a link.
+func releaseLink(u string) (string, bool) {
+	if !strings.HasPrefix(u, "https://github.com/") || strings.ContainsFunc(u, unicode.IsSpace) || clean(u, 200) != u {
+		return "", false
+	}
+	return u, true
+}
+
+// andList joins names as "A", "A and B", "A, B and C".
+func andList(names []string) string {
+	if len(names) <= 1 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
+}
+
+// assessVersion applies the version rules without the security note.
+func assessVersion(in VersionInput) Assessment {
 	var a Assessment
 	if in.Err != nil {
 		if httpjson.IsTransportError(in.Err) {
