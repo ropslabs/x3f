@@ -93,13 +93,21 @@ func (c *Client) Call(ctx context.Context, endpoint, method string, result any) 
 	req.Header.Set("Content-Type", "application/json")
 
 	var resp rpcResponse
-	if err := c.do(req, u, &resp); err != nil {
+	// Some servers answer a JSON-RPC error with HTTP 400 instead of 200,
+	// e.g. Aztec nodes (http200OnError: false); the error object is in
+	// the body either way.
+	status, err := c.do(req, u, &resp, http.StatusBadRequest)
+	if err != nil {
 		return err
 	}
 	if resp.Error != nil {
 		// The message comes from the server; redact it in case the server
 		// echoes the request URL.
-		return redact(fmt.Errorf("JSON-RPC error %d: %s", resp.Error.Code, resp.Error.Message), u)
+		return &RPCError{Code: resp.Error.Code,
+			msg: redact(fmt.Errorf("JSON-RPC error %d: %s", resp.Error.Code, resp.Error.Message), u).Error()}
+	}
+	if status != http.StatusOK {
+		return statusError(status)
 	}
 	// A missing result and an explicit null are both invalid here; decoding
 	// null would silently leave result at its zero value (e.g. false).
@@ -132,29 +140,59 @@ func (c *Client) Get(ctx context.Context, endpoint, path string, out any) error 
 	// (e.g. "eth/v1/node/version") is public and should stay readable in errors.
 	// The full URL is still covered: host, configured path segments and
 	// query values are each redacted on their own.
-	return c.do(req, base, out)
+	_, err = c.do(req, base, out)
+	return err
 }
 
-// do sends req and decodes a JSON response into out. All errors are redacted.
-func (c *Client) do(req *http.Request, u *url.URL, out any) error {
+// do sends req and decodes a JSON response into out. It returns the HTTP
+// status. Only 200 and the statuses in also are decoded; for those in also,
+// a body that is not JSON gives the status error. All errors are redacted.
+func (c *Client) do(req *http.Request, u *url.URL, out any, also ...int) (int, error) {
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return &TransportError{err: redact(describeTransportError(req.Context(), err), u)}
+		return 0, &TransportError{err: redact(describeTransportError(req.Context(), err), u)}
 	}
 	// defer runs when do returns, whichever return statement is taken.
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	ok := resp.StatusCode == http.StatusOK
+	if !ok && !slices.Contains(also, resp.StatusCode) {
 		// The body is deliberately not included: provider error pages may
 		// contain the API key or other details we do not want in logs.
-		return fmt.Errorf("unexpected HTTP status %s", StatusText(resp.StatusCode))
+		return resp.StatusCode, statusError(resp.StatusCode)
 	}
 
 	dec := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBytes))
 	if err := dec.Decode(out); err != nil {
-		return redact(fmt.Errorf("decode response: %w", err), u)
+		if !ok {
+			return resp.StatusCode, statusError(resp.StatusCode)
+		}
+		return resp.StatusCode, redact(fmt.Errorf("decode response: %w", err), u)
 	}
-	return nil
+	return resp.StatusCode, nil
+}
+
+func statusError(code int) error {
+	return fmt.Errorf("unexpected HTTP status %s", StatusText(code))
+}
+
+// RPCError is an error object a JSON-RPC server returned, e.g. code -32601
+// "method not found". Its message comes from the server and is redacted
+// like every error of this package.
+type RPCError struct {
+	Code int
+	msg  string
+}
+
+func (e *RPCError) Error() string { return e.msg }
+
+// RPCErrorCode returns the code of the RPCError in err's chain, if any.
+func RPCErrorCode(err error) (int, bool) {
+	var re *RPCError
+	if errors.As(err, &re) {
+		return re.Code, true
+	}
+	return 0, false
 }
 
 // TransportError means the endpoint could not be reached or did not answer
