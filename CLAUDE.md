@@ -48,6 +48,7 @@ cmd/x3f/              CLI entry point; node.go: node type interface, ethereum.go
 internal/config/      load and validate x3f.yaml
 internal/network/     known networks (mainnet, sepolia, hoodi) and chain IDs
 internal/software/    software identity: name, upstream repository, version suffix rules (no chain)
+internal/httpjson/    HTTP JSON transport (JSON-RPC, GET) with redacted errors, shared by node types
 internal/ethereum/    query clients (version, sync status, chain ID, fork config), parse version strings
 internal/releases/    GitHub releases (with disk cache) and security advisories, version comparison
 internal/status/      green / yellow / red rules and findings

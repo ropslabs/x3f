@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/httpjson"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/software"
 )
@@ -37,7 +38,7 @@ func gethReleases(t *testing.T) []releases.Release {
 func transportErr(t *testing.T) error {
 	t.Helper()
 	_, err := ethereum.NewClient(nil).ExecutionVersion(t.Context(), "http://127.0.0.1:1")
-	if !ethereum.IsTransportError(err) {
+	if !httpjson.IsTransportError(err) {
 		t.Fatalf("expected transport error, got %v", err)
 	}
 	return err

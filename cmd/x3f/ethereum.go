@@ -9,6 +9,7 @@ import (
 
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/httpjson"
 	"github.com/ropslabs/x3f/internal/network"
 	"github.com/ropslabs/x3f/internal/software"
 	"github.com/ropslabs/x3f/internal/status"
@@ -112,7 +113,7 @@ func queryLayer[S, F any](ctx context.Context, timeout time.Duration, endpoint s
 	raw, err := withTimeout(ctx, timeout, endpoint, fetchVersion)
 	if err != nil {
 		r.VersionErr = err
-		if ethereum.IsTransportError(err) {
+		if httpjson.IsTransportError(err) {
 			r.Unreachable = true
 			return r
 		}

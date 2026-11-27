@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/httpjson"
 	"github.com/ropslabs/x3f/internal/software"
 )
 
@@ -245,7 +245,7 @@ func fetchPage[T any](ctx context.Context, s *Source, pageURL string, repo softw
 		resp.Header.Get("X-RateLimit-Remaining") == "0":
 		return nil, false, "", "", fmt.Errorf("GitHub %s of %s: rate limit exceeded (set GITHUB_TOKEN for a higher limit)", l.kind, repo)
 	case resp.StatusCode != http.StatusOK:
-		return nil, false, "", "", fmt.Errorf("GitHub %s of %s: unexpected HTTP status %s", l.kind, repo, ethereum.StatusText(resp.StatusCode))
+		return nil, false, "", "", fmt.Errorf("GitHub %s of %s: unexpected HTTP status %s", l.kind, repo, httpjson.StatusText(resp.StatusCode))
 	}
 
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(&items); err != nil {

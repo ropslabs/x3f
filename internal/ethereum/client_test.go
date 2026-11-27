@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ropslabs/x3f/internal/httpjson"
 	"github.com/ropslabs/x3f/internal/software"
 )
 
@@ -55,7 +56,11 @@ func readFixture(t *testing.T, name string) []byte {
 func rpcServer(t *testing.T, wantMethod string, body []byte) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var req rpcRequest
+		// The fields of a JSON-RPC 2.0 request the mock checks.
+		var req struct {
+			JSONRPC string `json:"jsonrpc"`
+			Method  string `json:"method"`
+		}
 		if r.Method != http.MethodPost {
 			t.Errorf("method = %s, want POST", r.Method)
 		}
@@ -474,8 +479,8 @@ func TestIsTransportError(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected an error")
 			}
-			if got := IsTransportError(err); got != tt.want {
-				t.Errorf("IsTransportError(%v) = %v, want %v", err, got, tt.want)
+			if got := httpjson.IsTransportError(err); got != tt.want {
+				t.Errorf("httpjson.IsTransportError(%v) = %v, want %v", err, got, tt.want)
 			}
 		})
 	}

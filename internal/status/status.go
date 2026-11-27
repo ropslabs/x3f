@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/ropslabs/x3f/internal/ethereum"
+	"github.com/ropslabs/x3f/internal/httpjson"
 	"github.com/ropslabs/x3f/internal/network"
 	"github.com/ropslabs/x3f/internal/releases"
 	"github.com/ropslabs/x3f/internal/software"
@@ -115,7 +116,7 @@ type VersionInput struct {
 func AssessVersion(in VersionInput) Assessment {
 	var a Assessment
 	if in.Err != nil {
-		if ethereum.IsTransportError(in.Err) {
+		if httpjson.IsTransportError(in.Err) {
 			a.add(Crit, "unreachable: %v", in.Err)
 		} else {
 			a.add(Warn, "version query failed: %v", in.Err)
@@ -314,7 +315,7 @@ func syncError(a *Assessment, in SyncInput) (done bool) {
 		return true
 	case in.Err == nil:
 		return false
-	case ethereum.IsTransportError(in.Err):
+	case httpjson.IsTransportError(in.Err):
 		a.add(Crit, "sync status unreachable: %v", in.Err)
 	default:
 		a.add(Warn, "sync status query failed: %v", in.Err)
@@ -403,7 +404,7 @@ func chainID(a *Assessment, layer string, id uint64, err error, skipped bool) (u
 		return 0, false
 	case err == nil:
 		return id, true
-	case ethereum.IsTransportError(err):
+	case httpjson.IsTransportError(err):
 		a.add(Crit, "%s network query unreachable: %v", layer, err)
 	default:
 		a.add(Warn, "%s network detection failed: %v", layer, err)

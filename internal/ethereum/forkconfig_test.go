@@ -7,6 +7,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/ropslabs/x3f/internal/httpjson"
 )
 
 func TestExecutionForkConfig(t *testing.T) {
@@ -67,7 +69,7 @@ func TestExecutionForkConfigErrors(t *testing.T) {
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Errorf("error = %v, want %q", err, tt.wantErr)
 			}
-			if IsTransportError(err) {
+			if httpjson.IsTransportError(err) {
 				t.Error("must not be a transport error: the fallback depends on it")
 			}
 		})
