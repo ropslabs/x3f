@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ropslabs/x3f/internal/aztec"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/notify"
 	"github.com/ropslabs/x3f/internal/releases"
@@ -144,8 +145,9 @@ func testEnv(gh *fakeGitHub, at time.Time) env {
 			return d.DialContext(ctx, network, addr)
 		},
 	}
+	hc := &http.Client{Transport: transport}
 	return env{
-		client:        ethereum.NewClient(&http.Client{Transport: transport}),
+		clients:       clients{ethereum: ethereum.NewClient(hc), aztec: aztec.NewClient(hc)},
 		githubBaseURL: gh.URL,
 		now:           func() time.Time { return at },
 	}
@@ -329,6 +331,168 @@ nodes:
 	for _, secret := range []string{key, token, m.deadAddr, "127.0.0.1", "http://"} {
 		if strings.Contains(all, secret) {
 			t.Errorf("output leaks %q:\n%s", secret, all)
+		}
+	}
+}
+
+// aztecFixture reads a recorded Aztec node response from the aztec
+// package's testdata (sources: internal/aztec/testdata/SOURCES.md).
+func aztecFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "internal", "aztec", "testdata", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
+// TestRunAztec checks an Aztec node end to end: its own table, the version
+// and advisory rules with the recorded aztec-packages data, the metrics,
+// and that neither its URL nor an l1_url appear in the output.
+func TestRunAztec(t *testing.T) {
+	const key = "apikey0123456789secret" // gitleaks:allow (test dummy)
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	// Live mainnet answer: nodeVersion 6.0.0.
+	node := mockClient(t, map[string][]byte{
+		"aztec_getNodeInfo": aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json"),
+	})
+	path := writeConfig(t, `
+nodes:
+  - name: l1
+    execution_url: `+m.gethSynced.URL+`
+    beacon_url: `+m.lighthouseSynced.URL+`
+  - name: aztec-1
+    type: aztec
+    url: `+node.URL+`/`+key+`
+    l1: l1
+  - name: aztec-down
+    type: aztec
+    url: http://`+m.deadAddr+`/`+key+`
+    l1_url: https://l1.example/v3/`+key+`
+`)
+	metricsFile := filepath.Join(t.TempDir(), "x3f.prom")
+	var out, errOut bytes.Buffer
+	// 2026-11-24: v6.1.0 (2026-11-19) is the latest release, 6.0.0 is
+	// within the grace period.
+	code := run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir(), "-metrics-file", metricsFile},
+		&out, &errOut, testEnv(gh, now))
+	got := out.String()
+	if code != exitCrit {
+		t.Errorf("exit code = %d, want %d\n%s%s", code, exitCrit, got, errOut.String())
+	}
+
+	// The Aztec table follows the Ethereum table.
+	if i, j := strings.Index(got, "STATUS  NODE  NETWORK"), strings.Index(got, "STATUS  NODE        VERSION"); i < 0 || j < i {
+		t.Errorf("want the Ethereum table, then the Aztec table:\n%s", got)
+	}
+	rows := []struct {
+		node string
+		want []string
+	}{
+		{"l1", []string{"OK", "l1", "mainnet", "Geth 1.17.10 (stable)", "synced", "Lighthouse 8.3.3", "synced", "none scheduled", "none known"}},
+		{"aztec-1", []string{"WARN", "aztec-1", "Aztec 6.0.0 -> 6.1.0", "1 (medium)"}},
+		{"aztec-down", []string{"CRIT", "aztec-down", "ERROR", "-"}},
+	}
+	for _, r := range rows {
+		if cells := rowCells(t, got, r.node); !slices.Equal(cells, r.want) {
+			t.Errorf("row %s:\n got  %q\n want %q", r.node, cells, r.want)
+		}
+	}
+	for _, want := range []string{
+		"WARN  aztec-1 version: Aztec 6.0.0 outdated: latest 6.1.0; first newer release 6.1.0 published 5 days ago (grace period 30 days)",
+		// Real data: GHSA-73xc-j27q-wg75 (medium) has no fixed release
+		// for 6.x yet, so it is a note; GHSA-778c-2h5c-8r96 names its
+		// range in free text.
+		"NOTE  aztec-1 advisories: Aztec 6.0.0 is affected by 1 published advisory without a released fix (1 medium): no fix released yet, check the advisory for mitigations: GHSA-73xc-j27q-wg75 (medium: ",
+		"NOTE  aztec-1 advisories: cannot tell whether Aztec 6.0.0 is affected by GHSA-778c-2h5c-8r96",
+		"CRIT  aztec-down version: unreachable: getNodeInfo: connection failed",
+		"Status: CRIT (1 OK, 1 WARN, 1 CRIT)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output does not contain %q:\n%s", want, got)
+		}
+	}
+
+	gh.mu.Lock()
+	for _, p := range []string{"/repos/AztecProtocol/aztec-packages/releases", "/repos/AztecProtocol/aztec-packages/security-advisories"} {
+		if gh.requests[p] != 1 {
+			t.Errorf("%d requests for %s, want 1", gh.requests[p], p)
+		}
+	}
+	gh.mu.Unlock()
+
+	data, err := os.ReadFile(metricsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		`x3f_node_status{node="aztec-1"} 1`,
+		`x3f_node_status{node="aztec-down"} 2`,
+		`x3f_check_status{node="aztec-1",check="version"} 1`,
+		`x3f_check_status{node="aztec-1",check="advisories"} 0`,
+		`x3f_check_status{node="aztec-1",check="ignore_advisories"} 0`,
+		`x3f_check_status{node="aztec-down",check="version"} 2`,
+		`x3f_check_status{node="aztec-down",check="advisories"} 3`,
+		`x3f_client_info{node="aztec-1",component="node",client="aztec",version="6.0.0",build="release"} 1`,
+		`x3f_client_latest_info{client="aztec",version="6.1.0"} 1`,
+		`x3f_advisories{node="aztec-1",component="node",severity="medium"} 1`,
+	} {
+		if !strings.Contains(string(data), want+"\n") {
+			t.Errorf("metrics do not contain %q:\n%s", want, data)
+		}
+	}
+
+	all := got + errOut.String() + string(data)
+	for _, secret := range []string{key, m.deadAddr, "l1.example", "127.0.0.1", "http://"} {
+		if strings.Contains(all, secret) {
+			t.Errorf("output leaks %q:\n%s", secret, all)
+		}
+	}
+}
+
+// TestRunAztecIgnoreAdvisories checks the global and the node's own
+// ignore list on an Aztec node, with the recorded aztec-packages data.
+func TestRunAztecIgnoreAdvisories(t *testing.T) {
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	node := mockClient(t, map[string][]byte{
+		"aztec_getNodeInfo": aztecFixture(t, "live/aztec_getNodeInfo-drpc-mainnet.json"),
+	})
+	path := writeConfig(t, `
+ignore_advisories:
+  - {id: GHSA-73xc-j27q-wg75, reason: "no native verifier"}
+nodes:
+  - name: aztec-1
+    type: aztec
+    url: `+node.URL+`
+    l1_url: http://`+m.deadAddr+`
+    ignore_advisories:
+      - {id: GHSA-778c-2h5c-8r96, reason: "not on v4"}
+      - {id: GHSA-mp5j-q856-vvx7, reason: "meant for a besu node"}
+`)
+	var out bytes.Buffer
+	code := run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir()}, &out, &out, testEnv(gh, now))
+	got := out.String()
+	if code != exitWarn {
+		t.Errorf("exit code = %d, want %d\n%s", code, exitWarn, got)
+	}
+	if cells := rowCells(t, got, "aztec-1"); cells[3] != "none known" {
+		t.Errorf("advisories cell = %q, want %q", cells[3], "none known")
+	}
+	for _, want := range []string{
+		`NOTE  aztec-1 advisories: 2 ignored advisories for Aztec 6.0.0 (ignore_advisories): GHSA-`,
+		`reason "no native verifier"`,
+		`reason "not on v4"`,
+		"NOTE  aztec-1 ignore_advisories: GHSA-mp5j-q856-vvx7 is not a published advisory of Aztec; check the ID for a typo",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output does not contain %q:\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"cannot tell whether", "without a released fix", "ignore_advisories: GHSA-73xc", "ignore_advisories: GHSA-778c"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("output contains %q:\n%s", unwanted, got)
 		}
 	}
 }
@@ -1412,7 +1576,7 @@ func TestProxyFromEnvironment(t *testing.T) {
 func proxyChild() {
 	dir := os.Getenv("X3F_PROXY_DIR")
 	e := env{
-		client:          ethereum.NewClient(nil),
+		clients:         clients{ethereum: ethereum.NewClient(nil), aztec: aztec.NewClient(nil)},
 		githubBaseURL:   releases.DefaultBaseURL,
 		telegramBaseURL: notify.DefaultTelegramURL,
 		telegramToken:   telegramToken,

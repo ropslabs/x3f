@@ -132,29 +132,10 @@ func queryLayer[S, F any](ctx context.Context, timeout time.Duration, endpoint s
 
 // assess evaluates the node's result.
 func (n *ethereumNode) assess(up upstream, p assessParams) row {
-	rel, adv := up.rel, up.adv
-	now, grace := p.now, p.grace
-	versionInput := func(v software.Reported, err error) status.VersionInput {
-		in := status.VersionInput{Version: v, Err: err, Now: now, Grace: grace}
-		if repo, ok := software.RepoFor(v.Name); ok {
-			d := rel[repo]
-			in.Releases, in.ReleasesErr = d.result, d.err
-		}
-		return in
-	}
-	advisoryInput := func(v software.Reported, err error, ignore []config.AdvisoryIgnore) status.AdvisoryInput {
-		in := status.AdvisoryInput{Version: v, Err: err, Ignore: ignore, Now: now}
-		if repo, ok := software.RepoFor(v.Name); ok {
-			d := adv[repo]
-			in.Advisories, in.AdvisoriesErr = d.result, d.err
-			in.Releases = rel[repo].result
-		}
-		return in
-	}
-
+	now := p.now
 	r := n.r
-	ev := versionInput(r.Execution.Version, r.Execution.VersionErr)
-	cv := versionInput(r.Consensus.Version, r.Consensus.VersionErr)
+	ev := up.versionInput(r.Execution.Version, r.Execution.VersionErr, p)
+	cv := up.versionInput(r.Consensus.Version, r.Consensus.VersionErr, p)
 	chainID, haveChain := detectedChain(r)
 	fork := status.AssessForks(status.ForkInput{
 		Schedule: p.schedule, ChainID: chainID, HaveChain: haveChain,
@@ -164,9 +145,9 @@ func (n *ethereumNode) assess(up upstream, p assessParams) row {
 		Now: now, CriticalWithin: p.forkCriticalIn,
 	})
 	ignore := config.MergeIgnores(p.ignore, r.Ignore)
-	ea := status.AssessAdvisories(advisoryInput(r.Execution.Version, r.Execution.VersionErr, ignore))
-	ca := status.AssessAdvisories(advisoryInput(r.Consensus.Version, r.Consensus.VersionErr, ignore))
-	ignoreCheck, ignoreRan := checkIgnoreList(r.Ignore, n.software(), adv, false)
+	ea := status.AssessAdvisories(up.advisoryInput(r.Execution.Version, r.Execution.VersionErr, ignore, p))
+	ca := status.AssessAdvisories(up.advisoryInput(r.Consensus.Version, r.Consensus.VersionErr, ignore, p))
+	ignoreCheck, ignoreRan := checkIgnoreList(r.Ignore, n.software(), up.adv, false)
 	a := []layerFindings{
 		{"network", status.AssessNetwork(status.NetworkInput{
 			Expected:    r.Network,

@@ -150,10 +150,21 @@ const (
 	// TypeEthereum is an Ethereum node: an execution client and a
 	// consensus client. It is the type of a node without a type.
 	TypeEthereum = "ethereum"
+	// TypeAztec is an Aztec node. Its L1 is an Ethereum node, either
+	// one from the config (l1) or a provider endpoint (l1_url).
+	TypeAztec = "aztec"
 )
 
 // Types lists the known node types.
-var Types = []string{TypeEthereum}
+var Types = []string{TypeEthereum, TypeAztec}
+
+// typeFields lists the type-specific fields each type uses. A field set on
+// a node of another type is an error, so a misplaced field does not go
+// unnoticed and can get a meaning later without changing old configs.
+var typeFields = map[string][]string{
+	TypeEthereum: {"execution_url", "beacon_url", "network"},
+	TypeAztec:    {"url", "l1", "l1_url"},
+}
 
 // Node is one configured node. It is queried read-only. Which fields it
 // needs depends on its type.
@@ -163,13 +174,25 @@ type Node struct {
 	// Type is the kind of node, one of Types; empty means TypeEthereum.
 	// Validate normalizes it to lowercase and fills in the default.
 	Type string `yaml:"type,omitempty"`
-	// ExecutionURL is the JSON-RPC endpoint of the execution client.
-	ExecutionURL string `yaml:"execution_url"`
-	// BeaconURL is the beacon API endpoint of the consensus client.
-	BeaconURL string `yaml:"beacon_url"`
-	// Network is optional: if set ("mainnet", "sepolia", "hoodi", any
-	// capitalisation), x3f reports it as critical when the node is on a
-	// different network. Validate normalizes it to lowercase.
+	// ExecutionURL is the JSON-RPC endpoint of the execution client
+	// (type ethereum).
+	ExecutionURL string `yaml:"execution_url,omitempty"`
+	// BeaconURL is the beacon API endpoint of the consensus client (type
+	// ethereum).
+	BeaconURL string `yaml:"beacon_url,omitempty"`
+	// URL is the JSON-RPC endpoint of an Aztec node (type aztec).
+	URL string `yaml:"url,omitempty"`
+	// L1 names the Ethereum node in this config that an Aztec node uses
+	// as its L1. Exactly one of L1 and L1URL is set for type aztec.
+	// Validate trims it.
+	L1 string `yaml:"l1,omitempty"`
+	// L1URL is the JSON-RPC endpoint of an L1 provider, for an Aztec
+	// node whose L1 is not in the config. x3f only reads contracts
+	// through it and does not check it as an Ethereum node.
+	L1URL string `yaml:"l1_url,omitempty"`
+	// Network is optional (type ethereum): if set ("mainnet", "sepolia",
+	// "hoodi", any capitalisation), x3f reports it as critical when the
+	// node is on a different network. Validate normalizes it to lowercase.
 	Network string `yaml:"network,omitempty"`
 	// IgnoreAdvisories applies to this node in addition to the global
 	// list.
@@ -228,6 +251,13 @@ func (c *Config) Validate() error {
 		errs = append(errs, c.Telegram.validate()...)
 	}
 
+	// The l1 of an Aztec node refers to another node by name, so the
+	// types of all nodes are needed before the loop.
+	typeOf := make(map[string]string, len(c.Nodes))
+	for _, n := range c.Nodes {
+		typeOf[strings.TrimSpace(n.Name)] = normalizeType(n.Type)
+	}
+
 	// map[string]bool used as a set to detect duplicate names.
 	seen := make(map[string]bool)
 	for i, n := range c.Nodes {
@@ -243,35 +273,14 @@ func (c *Config) Validate() error {
 			seen[name] = true
 		}
 
-		typ := strings.ToLower(strings.TrimSpace(n.Type))
-		if typ == "" {
-			typ = TypeEthereum
-		}
+		typ := normalizeType(n.Type)
 		if !slices.Contains(Types, typ) {
 			errs = append(errs, fmt.Errorf("%s: type %q is not one of %s", label, n.Type, strings.Join(Types, ", ")))
 		} else {
 			c.Nodes[i].Type = typ
-		}
-
-		if typ == TypeEthereum {
-			if err := validateURL(n.ExecutionURL); err != nil {
-				errs = append(errs, fmt.Errorf("%s: execution_url: %w", label, err))
-			}
-			if err := validateURL(n.BeaconURL); err != nil {
-				errs = append(errs, fmt.Errorf("%s: beacon_url: %w", label, err))
-			}
-		}
-		if n.Network != "" {
-			// Accept any capitalisation ("Mainnet") and store the
-			// canonical lowercase name. n is a copy, so write back
-			// through the slice index.
-			normalized := strings.ToLower(strings.TrimSpace(n.Network))
-			if _, ok := network.ByName(normalized); !ok {
-				errs = append(errs, fmt.Errorf("%s: network %q is not one of %s",
-					label, n.Network, strings.Join(network.Names(), ", ")))
-			} else {
-				c.Nodes[i].Network = normalized
-			}
+			// &c.Nodes[i] points into the slice, so validateTyped can
+			// write normalized values back; n is only a copy.
+			errs = append(errs, validateTyped(&c.Nodes[i], label, typeOf)...)
 		}
 		errs = append(errs, validateIgnores(label+": ignore_advisories", n.IgnoreAdvisories)...)
 	}
@@ -279,6 +288,105 @@ func (c *Config) Validate() error {
 	// errors.Join combines several errors into one; it returns nil if the
 	// slice is empty.
 	return errors.Join(errs...)
+}
+
+// normalizeType returns the type in lowercase, TypeEthereum if it is empty.
+func normalizeType(t string) string {
+	t = strings.ToLower(strings.TrimSpace(t))
+	if t == "" {
+		return TypeEthereum
+	}
+	return t
+}
+
+// validateTyped checks the type-specific fields of n, whose type is known
+// and normalized, and normalizes their values. typeOf maps node names to
+// their types.
+func validateTyped(n *Node, label string, typeOf map[string]string) []error {
+	var errs []error
+	for _, f := range setFields(*n) {
+		if !slices.Contains(typeFields[n.Type], f) {
+			errs = append(errs, fmt.Errorf("%s: %s is not used by type %s", label, f, n.Type))
+		}
+	}
+	switch n.Type {
+	case TypeEthereum:
+		if err := validateURL(n.ExecutionURL); err != nil {
+			errs = append(errs, fmt.Errorf("%s: execution_url: %w", label, err))
+		}
+		if err := validateURL(n.BeaconURL); err != nil {
+			errs = append(errs, fmt.Errorf("%s: beacon_url: %w", label, err))
+		}
+		if n.Network != "" {
+			// Accept any capitalisation ("Mainnet") and store the
+			// canonical lowercase name.
+			normalized := strings.ToLower(strings.TrimSpace(n.Network))
+			if _, ok := network.ByName(normalized); !ok {
+				errs = append(errs, fmt.Errorf("%s: network %q is not one of %s",
+					label, n.Network, strings.Join(network.Names(), ", ")))
+			} else {
+				n.Network = normalized
+			}
+		}
+	case TypeAztec:
+		if err := validateURL(n.URL); err != nil {
+			errs = append(errs, fmt.Errorf("%s: url: %w", label, err))
+		}
+		errs = append(errs, validateL1(n, label, typeOf)...)
+	}
+	return errs
+}
+
+// setFields returns the type-specific fields that are set on n.
+func setFields(n Node) []string {
+	var set []string
+	for _, f := range []struct {
+		name, value string
+	}{
+		{"execution_url", n.ExecutionURL},
+		{"beacon_url", n.BeaconURL},
+		{"network", n.Network},
+		{"url", n.URL},
+		{"l1", n.L1},
+		{"l1_url", n.L1URL},
+	} {
+		if strings.TrimSpace(f.value) != "" {
+			set = append(set, f.name)
+		}
+	}
+	return set
+}
+
+// validateL1 checks the L1 of the Aztec node n: exactly one of l1 and
+// l1_url, and l1 must name an Ethereum node of this config. typeOf maps
+// node names to their types.
+func validateL1(n *Node, label string, typeOf map[string]string) []error {
+	n.L1 = strings.TrimSpace(n.L1)
+	hasURL := strings.TrimSpace(n.L1URL) != ""
+	switch {
+	case n.L1 == "" && !hasURL:
+		return []error{fmt.Errorf("%s: l1 (an Ethereum node of this config) or l1_url is required", label)}
+	case n.L1 != "" && hasURL:
+		return []error{fmt.Errorf("%s: set only one of l1 and l1_url", label)}
+	case hasURL:
+		if err := validateURL(n.L1URL); err != nil {
+			return []error{fmt.Errorf("%s: l1_url: %w", label, err)}
+		}
+		return nil
+	}
+	if strings.Contains(n.L1, "://") {
+		// The value is not repeated: a provider URL may contain an
+		// API key.
+		return []error{fmt.Errorf("%s: l1 is a node name; use l1_url for an endpoint URL", label)}
+	}
+	t, ok := typeOf[n.L1]
+	switch {
+	case !ok:
+		return []error{fmt.Errorf("%s: l1 %q is not a node of this config", label, n.L1)}
+	case t != TypeEthereum:
+		return []error{fmt.Errorf("%s: l1 %q is not an Ethereum node", label, n.L1)}
+	}
+	return nil
 }
 
 // ghsaRe matches a GitHub advisory ID after lowercasing, e.g.

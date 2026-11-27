@@ -6,9 +6,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/ropslabs/x3f/internal/aztec"
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/software"
+	"github.com/ropslabs/x3f/internal/status"
 )
 
 // checker checks one configured node. Every node type implements it, and
@@ -53,12 +55,44 @@ type upstream struct {
 	adv map[software.Repo]advisoryData
 }
 
+// versionInput is the input of status.AssessVersion for a version a node
+// reported (err is the error of the request).
+func (up upstream) versionInput(v software.Reported, err error, p assessParams) status.VersionInput {
+	in := status.VersionInput{Version: v, Err: err, Now: p.now, Grace: p.grace}
+	if repo, ok := software.RepoFor(v.Name); ok {
+		d := up.rel[repo]
+		in.Releases, in.ReleasesErr = d.result, d.err
+	}
+	return in
+}
+
+// advisoryInput is the input of status.AssessAdvisories, with the merged
+// ignore list of the node.
+func (up upstream) advisoryInput(v software.Reported, err error, ignore []config.AdvisoryIgnore, p assessParams) status.AdvisoryInput {
+	in := status.AdvisoryInput{Version: v, Err: err, Ignore: ignore, Now: p.now}
+	if repo, ok := software.RepoFor(v.Name); ok {
+		d := up.adv[repo]
+		in.Advisories, in.AdvisoriesErr = d.result, d.err
+		in.Releases = up.rel[repo].result
+	}
+	return in
+}
+
+// clients are the protocol clients of the node types. Tests replace them
+// to control the network.
+type clients struct {
+	ethereum *ethereum.Client
+	aztec    *aztec.Client
+}
+
 // newChecker returns the checker for a node. config.Validate has already
 // rejected unknown types.
-func newChecker(n config.Node, client *ethereum.Client) checker {
+func newChecker(n config.Node, c clients) checker {
 	switch n.Type {
 	case config.TypeEthereum:
-		return &ethereumNode{cfg: n, client: client}
+		return &ethereumNode{cfg: n, client: c.ethereum}
+	case config.TypeAztec:
+		return &aztecNode{cfg: n, client: c.aztec}
 	}
 	// Unreachable after validation; a panic shows a missing case at once.
 	panic(fmt.Sprintf("node %q: no checker for type %q", n.Name, n.Type))

@@ -44,7 +44,7 @@ Goal: for each configured node, report whether its clients are up to date, wheth
 ## Layout
 
 ```
-cmd/x3f/              CLI entry point; node.go: node type interface, ethereum.go: Ethereum node type
+cmd/x3f/              CLI entry point; node.go: node type interface, ethereum.go and aztec.go: the node types
 internal/config/      load and validate x3f.yaml
 internal/network/     known networks (mainnet, sepolia, hoodi) and chain IDs
 internal/software/    software identity: name, upstream repository, version suffix rules (no chain)

@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/ropslabs/x3f/internal/aztec"
 	"github.com/ropslabs/x3f/internal/config"
 	"github.com/ropslabs/x3f/internal/ethereum"
 	"github.com/ropslabs/x3f/internal/forks"
@@ -68,11 +69,11 @@ Environment:
 `
 
 // env bundles what run needs from the outside world, so tests can replace
-// it: the HTTP client for nodes, the GitHub and Telegram API locations and
+// it: the clients for nodes, the GitHub and Telegram API locations and
 // tokens, the clock and whether to use colors. The API locations are not
 // settings: only tests change them.
 type env struct {
-	client          *ethereum.Client
+	clients         clients
 	githubBaseURL   string
 	githubToken     string
 	telegramBaseURL string
@@ -87,7 +88,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, env{
-		client:          ethereum.NewClient(nil),
+		clients:         clients{ethereum: ethereum.NewClient(nil), aztec: aztec.NewClient(nil)},
 		githubBaseURL:   releases.DefaultBaseURL,
 		githubToken:     os.Getenv("GITHUB_TOKEN"),
 		telegramBaseURL: notify.DefaultTelegramURL,
@@ -197,7 +198,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, e env) in
 
 	nodes := make([]checker, len(cfg.Nodes))
 	for i, n := range cfg.Nodes {
-		nodes[i] = newChecker(n, e.client)
+		nodes[i] = newChecker(n, e.clients)
 	}
 	queryAll(ctx, nodes, *timeout)
 

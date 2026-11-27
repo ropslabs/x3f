@@ -441,3 +441,102 @@ func TestNodeType(t *testing.T) {
 		})
 	}
 }
+
+func TestAztecNode(t *testing.T) {
+	// Every case has the Ethereum node "eth" and the Aztec node "az";
+	// node holds the fields of "az" after its name.
+	const eth = "  - name: eth\n    execution_url: http://localhost:8545\n    beacon_url: http://localhost:5052\n"
+	tests := []struct {
+		name  string
+		node  string
+		extra string // more nodes
+		// wantErr is a part of the error; empty: no error expected.
+		wantErr           string
+		wantL1, wantL1URL string
+	}{
+		{
+			name:   "l1 names an Ethereum node",
+			node:   "    type: Aztec\n    url: http://localhost:8080\n    l1: \" eth \"\n",
+			wantL1: "eth",
+		},
+		{
+			name:      "l1_url",
+			node:      "    type: aztec\n    url: http://localhost:8080\n    l1_url: https://provider.example/v3/key\n",
+			wantL1URL: "https://provider.example/v3/key",
+		},
+		{
+			name:    "neither l1 nor l1_url",
+			node:    "    type: aztec\n    url: http://localhost:8080\n",
+			wantErr: `node "az": l1 (an Ethereum node of this config) or l1_url is required`,
+		},
+		{
+			name:    "both l1 and l1_url",
+			node:    "    type: aztec\n    url: http://localhost:8080\n    l1: eth\n    l1_url: https://provider.example\n",
+			wantErr: `node "az": set only one of l1 and l1_url`,
+		},
+		{
+			name:    "l1 is not a node",
+			node:    "    type: aztec\n    url: http://localhost:8080\n    l1: eht\n",
+			wantErr: `node "az": l1 "eht" is not a node of this config`,
+		},
+		{
+			name:    "l1 is not an Ethereum node",
+			node:    "    type: aztec\n    url: http://localhost:8080\n    l1: az2\n",
+			extra:   "  - name: az2\n    type: aztec\n    url: http://localhost:8081\n    l1: eth\n",
+			wantErr: `node "az": l1 "az2" is not an Ethereum node`,
+		},
+		{
+			name:    "l1 is a URL",
+			node:    "    type: aztec\n    url: http://localhost:8080\n    l1: https://provider.example/v3/secret-key\n",
+			wantErr: `node "az": l1 is a node name; use l1_url for an endpoint URL`,
+		},
+		{
+			name:    "url is required",
+			node:    "    type: aztec\n    l1: eth\n",
+			wantErr: `node "az": url: is required`,
+		},
+		{
+			name:    "invalid url and l1_url",
+			node:    "    type: aztec\n    url: \"https://host.example/%zz/secret\"\n    l1_url: \"ftp://secret@host.example\"\n",
+			wantErr: `node "az": l1_url: scheme must be http or https, got "ftp"`,
+		},
+		{
+			name: "Ethereum fields on an Aztec node",
+			node: "    type: aztec\n    url: http://localhost:8080\n    l1: eth\n" +
+				"    execution_url: http://localhost:8545\n    beacon_url: http://localhost:5052\n    network: mainnet\n",
+			wantErr: `node "az": execution_url is not used by type aztec` + "\n" +
+				`node "az": beacon_url is not used by type aztec` + "\n" +
+				`node "az": network is not used by type aztec`,
+		},
+		{
+			name: "Aztec fields on an Ethereum node",
+			node: "    execution_url: http://localhost:8545\n    beacon_url: http://localhost:5052\n" +
+				"    url: http://localhost:8080\n    l1: eth\n    l1_url: https://provider.example\n",
+			wantErr: `node "az": url is not used by type ethereum` + "\n" +
+				`node "az": l1 is not used by type ethereum` + "\n" +
+				`node "az": l1_url is not used by type ethereum`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := "nodes:\n" + eth + "  - name: az\n" + tt.node + tt.extra
+			cfg, err := Parse([]byte(yaml))
+			if err != nil && strings.Contains(err.Error(), "secret") {
+				t.Errorf("error leaks URL contents: %v", err)
+			}
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Errorf("error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			az := cfg.Nodes[1]
+			if az.Type != TypeAztec || az.L1 != tt.wantL1 || az.L1URL != tt.wantL1URL {
+				t.Errorf("type %q, l1 %q, l1_url %q; want aztec, %q, %q", az.Type, az.L1, az.L1URL, tt.wantL1, tt.wantL1URL)
+			}
+		})
+	}
+}
