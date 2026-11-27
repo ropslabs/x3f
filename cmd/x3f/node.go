@@ -39,6 +39,14 @@ type checker interface {
 	assess(up upstream, p assessParams) row
 }
 
+// linker is implemented by checkers whose row depends on other nodes, such
+// as an Aztec node on its L1 node. link completes the node's own row from
+// the rows of the other nodes, by node name, after every node is assessed.
+// Links go one level deep: a linked row is not itself linked to.
+type linker interface {
+	link(own *row, rows map[string]row)
+}
+
 // installed is one piece of software on a node, e.g. its execution client.
 type installed struct {
 	// component is its role on the node, e.g. "execution". It is used as

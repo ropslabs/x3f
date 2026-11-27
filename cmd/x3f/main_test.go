@@ -517,6 +517,7 @@ nodes:
 		`x3f_check_status{node="aztec-1",check="network"} 0`,
 		`x3f_check_status{node="aztec-1",check="version"} 1`,
 		`x3f_check_status{node="aztec-1",check="rollup"} 0`,
+		`x3f_check_status{node="aztec-1",check="l1"} 0`,
 		`x3f_check_status{node="aztec-1",check="advisories"} 0`,
 		`x3f_check_status{node="aztec-1",check="ignore_advisories"} 0`,
 		`x3f_check_status{node="aztec-down",check="network"} 3`,
@@ -530,6 +531,11 @@ nodes:
 		if !strings.Contains(string(data), want+"\n") {
 			t.Errorf("metrics do not contain %q:\n%s", want, data)
 		}
+	}
+
+	// aztec-down reads L1 through l1_url: a provider, not checked.
+	if strings.Contains(string(data), `node="aztec-down",check="l1"`) || strings.Contains(got, "aztec-1 l1:") {
+		t.Errorf("unexpected l1 check:\n%s\n%s", got, data)
 	}
 
 	all := got + errOut.String() + string(data)
@@ -2024,6 +2030,84 @@ nodes:
 			for _, secret := range []string{key, m.deadAddr, "127.0.0.1", "http://"} {
 				if strings.Contains(got+string(data), secret) {
 					t.Errorf("output leaks %q:\n%s", secret, got)
+				}
+			}
+		})
+	}
+}
+
+// TestRunAztecL1Node checks that an Aztec node shows the status of the
+// Ethereum node named in l1, whatever their order in the config.
+func TestRunAztecL1Node(t *testing.T) {
+	m := newMocks(t)
+	gh := newFakeGitHub(t)
+	// Derived: the node runs the latest release, so only the l1 check can
+	// make its row yellow.
+	node := mockClient(t, map[string][]byte{
+		"aztec_getNodeInfo": derivedNodeInfo(t, func(r map[string]any) { r["nodeVersion"] = "6.1.0" }),
+	})
+	tests := []struct {
+		name      string
+		execution map[string][]byte // the L1 node's answers besides the Aztec reads
+		consensus *httptest.Server
+		l1Level   string
+	}{
+		{
+			// The outdated Besu node of TestRunReport.
+			name: "L1 node red",
+			execution: map[string][]byte{
+				"web3_clientVersion": fixture(t, "execution/besu.json"),
+				"eth_syncing":        fixture(t, "execution/syncing-false.json"),
+				"eth_config":         fixture(t, "execution/live/eth-config-mevblocker-mainnet.json"),
+			},
+			consensus: m.nimbusSynced, l1Level: "CRIT",
+		},
+		{
+			// The indexing Geth node of TestRunReport.
+			name: "L1 node yellow",
+			execution: map[string][]byte{
+				"web3_clientVersion": fixture(t, "execution/geth.json"),
+				"eth_syncing":        fixture(t, "execution/syncing-geth-indexing.json"),
+				"eth_config":         fixture(t, "execution/live/eth-config-publicnode-mainnet.json"),
+			},
+			consensus: m.lighthouseSynced, l1Level: "WARN",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l1 := mainnetL1(t, tt.execution)
+			path := writeConfig(t, `
+nodes:
+  - name: aztec-1
+    type: aztec
+    url: `+node.URL+`
+    l1: eth-1
+  - name: eth-1
+    execution_url: `+l1.URL+`
+    beacon_url: `+tt.consensus.URL+`
+`)
+			metricsFile := filepath.Join(t.TempDir(), "x3f.prom")
+			var out bytes.Buffer
+			run(context.Background(), []string{"-config", path, "-timeout", "2s", "-cache-dir", t.TempDir(), "-metrics-file", metricsFile},
+				&out, &out, testEnv(gh, now))
+			got := out.String()
+			// Yellow, not red: the L1 node's own findings are in its own row.
+			if cells := rowCells(t, got, "aztec-1"); cells[0] != "WARN" || cells[3] != "Aztec 6.1.0" || cells[4] != "2070860440 (canonical)" {
+				t.Errorf("aztec-1 row %q", cells)
+			}
+			if cells := rowCells(t, got, "eth-1"); cells[0] != tt.l1Level {
+				t.Errorf("eth-1 row %q, want %s", cells, tt.l1Level)
+			}
+			if want := `WARN  aztec-1 l1: L1 node "eth-1" is ` + tt.l1Level + `, see its findings`; !strings.Contains(got, want) {
+				t.Errorf("output does not contain %q:\n%s", want, got)
+			}
+			data, err := os.ReadFile(metricsFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range []string{`x3f_check_status{node="aztec-1",check="l1"} 1`, `x3f_node_status{node="aztec-1"} 1`} {
+				if !strings.Contains(string(data), want+"\n") {
+					t.Errorf("metrics lack %q:\n%s", want, data)
 				}
 			}
 		})

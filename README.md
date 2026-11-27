@@ -239,7 +239,7 @@ nodes:
     l1_url: https://eth.example.com/v3/<key>   # or: an L1 provider endpoint
 ```
 
-Set exactly one of `l1` and `l1_url`. `l1` names an Ethereum node of the same config; x3f checks that node as usual and reads the Aztec contracts through its `execution_url`. `l1_url` is for an L1 provider: x3f only reads the Aztec contracts through it and does not check it as an Ethereum node, so a provider's load balancer does not turn the Aztec node yellow. Like all URLs, `url` and `l1_url` are never printed. The fields of one node type are not allowed on the other (for example `execution_url` on an Aztec node).
+Set exactly one of `l1` and `l1_url`. `l1` names an Ethereum node of the same config; x3f checks that node as usual, reads the Aztec contracts through its `execution_url` and shows a problem of that node in the Aztec row as well, so a broken L1 does not go unnoticed there (a Telegram message then names both nodes). `l1_url` is for an L1 provider: x3f only reads the Aztec contracts through it and does not check it as an Ethereum node, so a provider's load balancer does not turn the Aztec node yellow. Like all URLs, `url` and `l1_url` are never printed. The fields of one node type are not allowed on the other (for example `execution_url` on an Aztec node).
 
 x3f calls `aztec_getNodeInfo` on the node (a node older than v5, which does not know it, is asked with `node_getNodeInfo`), and `eth_chainId` and `eth_call` on the L1, all read-only. Aztec nodes get a table of their own:
 
@@ -262,6 +262,7 @@ Status: WARN (0 OK, 1 WARN, 0 CRIT)
 |---|---|---|---|
 | **Network** | a known network (mainnet or testnet, by the node's L1 chain and registry), and the configured one if `network:` is set | an unknown network | another network than configured |
 | **Rollup** | the node follows the canonical rollup, the one its registry on L1 names as current | not checked, with the reason: the L1 is unreachable, a read failed, or the L1 is on another chain than the node's L1 (the check is reported as unknown) | the node follows another rollup, for example after a network upgrade it did not follow |
+| **L1** (only with `l1`) | the Ethereum node named in `l1` is OK | that Ethereum node is WARN or CRIT; its own findings are in the Ethereum table | never: a problem of the L1 node is red in its own row |
 
 x3f reads the registry through its own L1 access (`l1` or `l1_url`); which L1 endpoint the node itself uses, x3f cannot see. If that access is on another chain than the node's L1, x3f does not compare: it would read another network's registry.
 
@@ -331,7 +332,7 @@ The file is written atomically (a temporary file in the same directory, then ren
 | Metric | Labels | Value |
 |---|---|---|
 | `x3f_node_status` | `node` | 0 OK, 1 WARN, 2 CRIT |
-| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories`; for Aztec nodes `network`, `version`, `rollup`, `advisories`, `ignore_advisories` |
+| `x3f_check_status` | `node`, `check` | 0 OK, 1 WARN, 2 CRIT, 3 unknown (the check could not run), per check: `network`, `execution`, `execution_sync`, `consensus`, `consensus_sync`, `fork`, `execution_advisories`, `consensus_advisories`, `ignore_advisories`; for Aztec nodes `network`, `version`, `rollup`, `l1` (only with `l1`), `advisories`, `ignore_advisories` |
 | `x3f_client_info` | `node`, `component`, `client`, `version`, `build` | 1; `component` is `execution` or `consensus` (Ethereum) or `node` (Aztec, `client="aztec"`); `build` is `release`, `prerelease`, `dev` or `unknown` |
 | `x3f_client_latest_info` | `client`, `version` | 1, the highest stable release known from GitHub |
 | `x3f_advisories` | `node`, `component`, `severity` | number of published advisories that affect the client and are not ignored; `severity` is `critical`, `high`, `medium`, `low` or `none` |

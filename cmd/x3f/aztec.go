@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -123,19 +124,49 @@ func (n *aztecNode) assess(up upstream, p assessParams) row {
 		rollupCheck, rollupCell, rollupNotRun = status.AssessRollup(n.rollup)
 	}
 
+	findings := []layerFindings{
+		{"network", netCheck, n.err != nil},
+		{"version", status.AssessVersion(vi), false},
+		{"rollup", rollupCheck, rollupNotRun},
+	}
+	if n.cfg.L1 != "" {
+		// Set by link once the L1 node's row is known; until then the
+		// check counts as not run. With l1_url the L1 is a provider
+		// that x3f does not check, so there is no such check.
+		findings = append(findings, layerFindings{name: "l1", notRun: true})
+	}
+	findings = append(findings,
+		// An empty cell means the node was not assessed.
+		layerFindings{"advisories", adv.Assessment, adv.Cell == ""},
+		layerFindings{"ignore_advisories", ignoreCheck, len(n.cfg.IgnoreAdvisories) > 0 && !ignoreRan},
+	)
 	rw := row{
-		cells: []string{netCell, formatVersion(n.version, n.err, vi), rollupCell, advCell},
-		findings: []layerFindings{
-			{"network", netCheck, n.err != nil},
-			{"version", status.AssessVersion(vi), false},
-			{"rollup", rollupCheck, rollupNotRun},
-			// An empty cell means the node was not assessed.
-			{"advisories", adv.Assessment, adv.Cell == ""},
-			{"ignore_advisories", ignoreCheck, len(n.cfg.IgnoreAdvisories) > 0 && !ignoreRan},
-		},
+		cells:    []string{netCell, formatVersion(n.version, n.err, vi), rollupCell, advCell},
+		findings: findings,
 	}
 	if adv.Counts != nil {
 		rw.advisories = []componentCounts{{"node", adv.Counts}}
 	}
 	return rw
+}
+
+// link sets the l1 check from the row of the Ethereum node named in l1:
+// the Aztec node depends on it, so a problem there shows here as well. It
+// is at most yellow, since the L1 node's own findings are in its own row.
+func (n *aztecNode) link(own *row, rows map[string]row) {
+	if n.cfg.L1 == "" {
+		return
+	}
+	i := slices.IndexFunc(own.findings, func(f layerFindings) bool { return f.name == "l1" })
+	l1, ok := rows[n.cfg.L1]
+	if i < 0 || !ok {
+		return
+	}
+	var a status.Assessment
+	if l1.level != status.OK {
+		a.Level = status.Warn
+		a.Findings = []status.Finding{{Level: status.Warn,
+			Message: fmt.Sprintf("L1 node %q is %s, see its findings", n.cfg.L1, l1.level)}}
+	}
+	own.findings[i] = layerFindings{name: "l1", Assessment: a}
 }

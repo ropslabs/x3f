@@ -177,20 +177,45 @@ type assessParams struct {
 }
 
 // assessAll evaluates all nodes. It returns the rows, in config order, and
-// the overall level.
+// the overall level. Rows that depend on other nodes (see linker) are
+// completed in a second pass, when the levels of all rows are known.
 func assessAll(nodes []checker, up upstream, p assessParams) ([]row, status.Level) {
-	overall := status.OK
 	rows := make([]row, 0, len(nodes))
 	for _, n := range nodes {
 		rw := n.assess(up, p)
 		rw.node, rw.typ, rw.columns = n.name(), n.typ(), n.columns()
-		for _, x := range rw.findings {
-			rw.level = max(rw.level, x.Level)
-		}
-		overall = max(overall, rw.level)
+		rw.level = rowLevel(rw)
 		rows = append(rows, rw)
 	}
+
+	// Keys without surrounding spaces, as config.Validate compares names.
+	byName := make(map[string]row, len(rows))
+	for _, rw := range rows {
+		byName[strings.TrimSpace(rw.node)] = rw
+	}
+	for i, n := range nodes {
+		// A type assertion with ", ok" asks whether n also implements
+		// linker, without failing if it does not.
+		if l, ok := n.(linker); ok {
+			l.link(&rows[i], byName)
+			rows[i].level = rowLevel(rows[i])
+		}
+	}
+
+	overall := status.OK
+	for _, rw := range rows {
+		overall = max(overall, rw.level)
+	}
 	return rows, overall
+}
+
+// rowLevel is the worst level of a row's checks.
+func rowLevel(rw row) status.Level {
+	level := status.OK
+	for _, x := range rw.findings {
+		level = max(level, x.Level)
+	}
+	return level
 }
 
 // notifyChanges sends a Telegram message about the nodes whose status
