@@ -19,8 +19,8 @@ func TestLoad(t *testing.T) {
 	}
 
 	want := []Node{
-		{Name: "mainnet-1", ExecutionURL: "http://localhost:8545", BeaconURL: "http://localhost:5052"},
-		{Name: "hoodi-1", ExecutionURL: "https://hoodi.example.internal:8545", BeaconURL: "https://hoodi.example.internal:5052"},
+		{Name: "mainnet-1", Type: TypeEthereum, ExecutionURL: "http://localhost:8545", BeaconURL: "http://localhost:5052"},
+		{Name: "hoodi-1", Type: TypeEthereum, ExecutionURL: "https://hoodi.example.internal:8545", BeaconURL: "https://hoodi.example.internal:5052"},
 	}
 	if len(cfg.Nodes) != len(want) {
 		t.Fatalf("got %d nodes, want %d", len(cfg.Nodes), len(want))
@@ -406,5 +406,38 @@ nodes:
 	_, err = parse("telegram: {chat_id: \"" + token + "\"}\n")
 	if err == nil || strings.Contains(err.Error(), "AAsecret") {
 		t.Errorf("error = %v", err)
+	}
+}
+
+func TestNodeType(t *testing.T) {
+	tests := []struct {
+		name, typ string
+		want      string // normalized type; empty: an error is expected
+	}{
+		{"default", "", TypeEthereum},
+		{"explicit", "ethereum", TypeEthereum},
+		{"capitalized", " Ethereum ", TypeEthereum},
+		{"unknown", "solana", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			yaml := "nodes:\n  - name: a\n    execution_url: http://localhost:8545\n    beacon_url: http://localhost:5052\n"
+			if tt.typ != "" {
+				yaml += "    type: \"" + tt.typ + "\"\n"
+			}
+			cfg, err := Parse([]byte(yaml))
+			if tt.want == "" {
+				if err == nil || !strings.Contains(err.Error(), `node "a": type "solana" is not one of ethereum`) {
+					t.Errorf("error = %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Nodes[0].Type; got != tt.want {
+				t.Errorf("type = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }

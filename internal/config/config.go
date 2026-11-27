@@ -145,11 +145,24 @@ func MergeIgnores(global, node []AdvisoryIgnore) []AdvisoryIgnore {
 	return merged
 }
 
-// Node is one Ethereum node, made up of an execution client and a consensus
-// client. Both are queried read-only.
+// Node types. Each type is compiled into x3f.
+const (
+	// TypeEthereum is an Ethereum node: an execution client and a
+	// consensus client. It is the type of a node without a type.
+	TypeEthereum = "ethereum"
+)
+
+// Types lists the known node types.
+var Types = []string{TypeEthereum}
+
+// Node is one configured node. It is queried read-only. Which fields it
+// needs depends on its type.
 type Node struct {
 	// Name identifies the node in output and alerts. It must be unique.
 	Name string `yaml:"name"`
+	// Type is the kind of node, one of Types; empty means TypeEthereum.
+	// Validate normalizes it to lowercase and fills in the default.
+	Type string `yaml:"type,omitempty"`
 	// ExecutionURL is the JSON-RPC endpoint of the execution client.
 	ExecutionURL string `yaml:"execution_url"`
 	// BeaconURL is the beacon API endpoint of the consensus client.
@@ -230,11 +243,23 @@ func (c *Config) Validate() error {
 			seen[name] = true
 		}
 
-		if err := validateURL(n.ExecutionURL); err != nil {
-			errs = append(errs, fmt.Errorf("%s: execution_url: %w", label, err))
+		typ := strings.ToLower(strings.TrimSpace(n.Type))
+		if typ == "" {
+			typ = TypeEthereum
 		}
-		if err := validateURL(n.BeaconURL); err != nil {
-			errs = append(errs, fmt.Errorf("%s: beacon_url: %w", label, err))
+		if !slices.Contains(Types, typ) {
+			errs = append(errs, fmt.Errorf("%s: type %q is not one of %s", label, n.Type, strings.Join(Types, ", ")))
+		} else {
+			c.Nodes[i].Type = typ
+		}
+
+		if typ == TypeEthereum {
+			if err := validateURL(n.ExecutionURL); err != nil {
+				errs = append(errs, fmt.Errorf("%s: execution_url: %w", label, err))
+			}
+			if err := validateURL(n.BeaconURL); err != nil {
+				errs = append(errs, fmt.Errorf("%s: beacon_url: %w", label, err))
+			}
 		}
 		if n.Network != "" {
 			// Accept any capitalisation ("Mainnet") and store the
